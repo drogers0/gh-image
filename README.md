@@ -22,6 +22,22 @@ Output:
 ![screenshot](https://github.com/user-attachments/assets/<uuid>)
 ```
 
+### Example: Upload an image and attach it to a GitHub issue
+
+```bash
+# Upload the image
+gh image screenshot.png --repo owner/repo
+# Output: ![screenshot.png](https://github.com/user-attachments/assets/88f4599a-...)
+
+# Use the output in a new issue
+gh issue create --repo owner/repo \
+  --title "Bug report" \
+  --body "Here's what I see:
+
+![screenshot.png](https://github.com/user-attachments/assets/88f4599a-...)
+"
+```
+
 ## Install
 
 ```bash
