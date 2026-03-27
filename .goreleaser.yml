@@ -19,14 +19,8 @@ builds:
         goarch: arm64
 
 archives:
-  - format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files:
-      - LICENSE
-      - README.md
-    format_overrides:
-      - goos: windows
-        format: zip
+  - format: binary
+    name_template: "{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"
