@@ -2,19 +2,25 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/drogers0/gh-image/internal/cookies"
 	"github.com/drogers0/gh-image/internal/repo"
+	"github.com/drogers0/gh-image/internal/session"
 	"github.com/drogers0/gh-image/internal/upload"
 )
 
-const usage = "Usage: gh image [--repo owner/repo] <image-path>..."
+const usage = `Usage:
+  gh image [--repo owner/repo] [--token <value>] <image-path>...
+  gh image extract-token
+  gh image check-token [--token <value>]`
 
 func main() {
 	var repoFlag string
 	var repoSet bool
+	var tokenFlag string
 	var imagePaths []string
 
 	// Manual arg parsing so flags can appear anywhere (before or after positional args).
@@ -51,6 +57,15 @@ func main() {
 			}
 			repoFlag = strings.SplitN(arg, "=", 2)[1]
 			repoSet = true
+		case arg == "--token":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Error: --token requires a value\n%s\n", usage)
+				os.Exit(1)
+			}
+			i++
+			tokenFlag = args[i]
+		case strings.HasPrefix(arg, "--token="):
+			tokenFlag = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--help" || arg == "-h":
 			fmt.Printf("%s\n\n", usage)
 			fmt.Println("Upload images to GitHub and print markdown references.")
@@ -60,6 +75,14 @@ func main() {
 			fmt.Println()
 			fmt.Println("Flags:")
 			fmt.Println("  --repo owner/repo   GitHub repository (optional)")
+			fmt.Println("  --token <value>     GitHub session token (default: extracted from browser)")
+			fmt.Println("                      Can also be set via GH_IMAGE_TOKEN environment variable")
+			fmt.Println("                      WARNING: --token values are visible in process listings.")
+			fmt.Println("                      Prefer GH_IMAGE_TOKEN on shared machines.")
+			fmt.Println()
+			fmt.Println("Subcommands:")
+			fmt.Println("  extract-token       Extract session token from browser and print to stdout")
+			fmt.Println("  check-token         Verify a session token is valid and print username to stdout")
 			fmt.Println()
 			fmt.Println("Use -- to separate flags from filenames starting with a dash:")
 			fmt.Println("  gh image -- -screenshot.png")
@@ -73,6 +96,20 @@ func main() {
 			os.Exit(1)
 		default:
 			imagePaths = append(imagePaths, arg)
+		}
+	}
+
+	// Dispatch subcommands before any other validation.
+	if len(imagePaths) > 0 {
+		switch imagePaths[0] {
+		case "extract-token":
+			if tokenFlag != "" {
+				fmt.Fprintf(os.Stderr, "Error: --token cannot be combined with extract-token (extract-token always reads from browser)\n")
+				os.Exit(1)
+			}
+			handleExtractToken()
+		case "check-token":
+			handleCheckToken(tokenFlag)
 		}
 	}
 
@@ -110,8 +147,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Get session cookie
-	cookie, err := cookies.GetGitHubSession()
+	// Get session cookie (flag > env var > browser)
+	cookie, err := resolveSessionCookie(tokenFlag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -134,3 +171,67 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// resolveSessionCookie returns a GitHub session cookie using the first available
+// source: --token flag, GH_IMAGE_TOKEN environment variable, or browser extraction.
+func resolveSessionCookie(tokenFlag string) (*http.Cookie, error) {
+	if tokenFlag != "" {
+		return cookieFromValue(tokenFlag)
+	}
+	if env := os.Getenv("GH_IMAGE_TOKEN"); env != "" {
+		return cookieFromValue(env)
+	}
+	cookie, err := cookies.GetGitHubSession()
+	if err != nil {
+		return nil, fmt.Errorf("no session token found (set --token flag or GH_IMAGE_TOKEN env var, or log into GitHub in a supported browser): %w", err)
+	}
+	return cookie, nil
+}
+
+// cookieFromValue constructs a GitHub user_session cookie from a raw token value.
+func cookieFromValue(value string) (*http.Cookie, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, fmt.Errorf("session token is empty")
+	}
+	return &http.Cookie{
+		Name:     "user_session",
+		Value:    value,
+		Domain:   "github.com",
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+	}, nil
+}
+
+// handleExtractToken extracts the session cookie from the browser and prints
+// the raw token value to stdout. Source info is written to stderr.
+func handleExtractToken() {
+	cookie, err := cookies.GetGitHubSession()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stderr, "Extracted session token from browser cookies")
+	fmt.Println(cookie.Value)
+	os.Exit(0)
+}
+
+// handleCheckToken verifies the session cookie and prints the username to stdout.
+// Token source is resolved via resolveSessionCookie (flag > env var > browser).
+func handleCheckToken(tokenFlag string) {
+	cookie, err := resolveSessionCookie(tokenFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	username, err := session.CheckValidity(cookie)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stderr, "Token is valid")
+	fmt.Println(username)
+	os.Exit(0)
+}
+
