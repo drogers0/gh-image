@@ -30,6 +30,13 @@ func GetGitHubSession() (*http.Cookie, error) {
 		return &cookies[0].Cookie, nil
 	}
 
+	// Fallback: read cookies directly via sqlite3 + platform keychain.
+	// Handles browsers kooky doesn't support (e.g. Arc) and works around
+	// kooky decryption failures.
+	if c, fallbackErr := directReadGitHubSession(); fallbackErr == nil {
+		return c, nil
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("reading browser cookies: %w", err)
 	}
