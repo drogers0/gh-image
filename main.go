@@ -206,13 +206,22 @@ func classifySubcommand(imagePaths []string, firstPosAfterDoubleDash bool, token
 // resolveSessionCookie returns a GitHub session cookie using the first available
 // source: --token flag, GH_SESSION_TOKEN environment variable, or browser extraction.
 func resolveSessionCookie(tokenFlag string) (*http.Cookie, error) {
+	return resolveSessionCookieWithGetter(tokenFlag, os.Getenv("GH_SESSION_TOKEN"), cookies.GetGitHubSession)
+}
+
+// resolveSessionCookieWithGetter is a testable variant of resolveSessionCookie
+// that accepts explicit env value and browser cookie getter dependencies.
+func resolveSessionCookieWithGetter(tokenFlag, envToken string, getBrowserCookie func() (*http.Cookie, error)) (*http.Cookie, error) {
 	if tokenFlag != "" {
 		return cookieFromValue(tokenFlag)
 	}
-	if env := os.Getenv("GH_SESSION_TOKEN"); env != "" {
-		return cookieFromValue(env)
+	if envToken != "" {
+		return cookieFromValue(envToken)
 	}
-	cookie, err := cookies.GetGitHubSession()
+	if getBrowserCookie == nil {
+		return nil, fmt.Errorf("no session token found (set --token flag or GH_SESSION_TOKEN env var, or log into GitHub in a supported browser): browser session getter is unavailable")
+	}
+	cookie, err := getBrowserCookie()
 	if err != nil {
 		return nil, fmt.Errorf("no session token found (set --token flag or GH_SESSION_TOKEN env var, or log into GitHub in a supported browser): %w", err)
 	}

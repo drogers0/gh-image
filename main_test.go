@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -84,16 +86,32 @@ func TestResolveSessionCookie_EnvFallback(t *testing.T) {
 
 // TestResolveSessionCookie_BrowserFallbackError verifies browser error is wrapped correctly.
 func TestResolveSessionCookie_BrowserFallbackError(t *testing.T) {
-	// No flag, no env var: should fall through to browser extraction which
-	// will fail in CI (no browser). Confirm the error message contains guidance.
-	t.Setenv("GH_SESSION_TOKEN", "")
-	_, err := resolveSessionCookie("")
+	_, err := resolveSessionCookieWithGetter("", "", func() (*http.Cookie, error) {
+		return nil, fmt.Errorf("no browser cookies available")
+	})
 	if err == nil {
-		// Only expected to fail when not in a browser environment
-		t.Skip("browser cookies found; skipping browser-error test")
+		t.Fatal("expected error when browser getter fails, got nil")
 	}
 	if !strings.Contains(err.Error(), "no session token found") {
 		t.Errorf("expected 'no session token found' in error, got: %v", err)
+	}
+}
+
+func TestResolveSessionCookie_BrowserFallbackSuccess(t *testing.T) {
+	cookie, err := resolveSessionCookieWithGetter("", "", func() (*http.Cookie, error) {
+		return &http.Cookie{
+			Name:  "user_session",
+			Value: "browser_token",
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cookie == nil {
+		t.Fatal("expected non-nil cookie")
+	}
+	if cookie.Value != "browser_token" {
+		t.Fatalf("expected browser token, got %q", cookie.Value)
 	}
 }
 
