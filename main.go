@@ -73,6 +73,10 @@ func main() {
 			}
 			i++
 			tokenFlag = args[i]
+			if tokenFlag == "" {
+				fmt.Fprintf(os.Stderr, "Error: --token value cannot be empty\n%s\n", usage)
+				os.Exit(1)
+			}
 			tokenSet = true
 		case strings.HasPrefix(arg, "--token="):
 			if tokenSet {
@@ -80,6 +84,10 @@ func main() {
 				os.Exit(1)
 			}
 			tokenFlag = strings.SplitN(arg, "=", 2)[1]
+			if tokenFlag == "" {
+				fmt.Fprintf(os.Stderr, "Error: --token value cannot be empty\n%s\n", usage)
+				os.Exit(1)
+			}
 			tokenSet = true
 		case arg == "--help" || arg == "-h":
 			fmt.Printf("%s\n\n", usage)
