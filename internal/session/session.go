@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"regexp"
 	"time"
+
+	"github.com/drogers0/gh-image/internal/cookies"
 )
 
 var userLoginRe = regexp.MustCompile(`<meta name="user-login" content="([^"]+)"`)
@@ -42,13 +44,9 @@ func checkValidity(client *http.Client, targetURL string, sessionCookie *http.Co
 	if err != nil {
 		return "", fmt.Errorf("failed to validate token: %w", err)
 	}
-	// Attach cookies directly on the request so they work with
-	// non-github.com hosts (e.g., httptest servers in tests).
-	req.AddCookie(sessionCookie)
-	req.AddCookie(&http.Cookie{
-		Name:  "__Host-user_session_same_site",
-		Value: sessionCookie.Value,
-	})
+	for _, c := range cookies.SessionCookiePair(sessionCookie) {
+		req.AddCookie(c)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

@@ -114,11 +114,6 @@ func main() {
 		}
 	}
 
-	if tokenSet && strings.TrimSpace(tokenFlag) == "" {
-		fmt.Fprintf(os.Stderr, "Error: --token value cannot be empty\n")
-		os.Exit(1)
-	}
-
 	// Dispatch subcommands before any other validation.
 	subcommand, dispatchErr := classifySubcommand(imagePaths, firstPosAfterDoubleDash, tokenFlag)
 	if dispatchErr != nil {
@@ -229,10 +224,18 @@ func resolveSessionCookie(tokenFlag string) (*http.Cookie, error) {
 // that accepts explicit env value and browser cookie getter dependencies.
 func resolveSessionCookieWithGetter(tokenFlag, envToken string, getBrowserCookie func() (*http.Cookie, error)) (*http.Cookie, error) {
 	if tokenFlag != "" {
-		return cookieFromValue(tokenFlag)
+		cookie, err := cookieFromValue(tokenFlag)
+		if err != nil {
+			return nil, fmt.Errorf("--token flag: %w", err)
+		}
+		return cookie, nil
 	}
 	if envToken != "" {
-		return cookieFromValue(envToken)
+		cookie, err := cookieFromValue(envToken)
+		if err != nil {
+			return nil, fmt.Errorf("GH_SESSION_TOKEN: %w", err)
+		}
+		return cookie, nil
 	}
 	if getBrowserCookie == nil {
 		return nil, fmt.Errorf("no session token found (set --token flag or GH_SESSION_TOKEN env var, or log into GitHub in a supported browser): browser session getter is unavailable")

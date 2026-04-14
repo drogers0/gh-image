@@ -204,8 +204,24 @@ func TestResolveSessionCookie_WhitespaceEnvVar(t *testing.T) {
 	if !strings.Contains(err.Error(), "empty") {
 		t.Errorf("expected error containing 'empty', got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "GH_SESSION_TOKEN") {
+		t.Errorf("expected error to identify source 'GH_SESSION_TOKEN', got: %v", err)
+	}
 	if browserCalled {
 		t.Error("whitespace-only env token should not fall through to browser getter")
+	}
+}
+
+func TestResolveSessionCookie_WhitespaceFlag(t *testing.T) {
+	_, err := resolveSessionCookieWithGetter("   ", "env_token", nil)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only flag token, got nil")
+	}
+	if !strings.Contains(err.Error(), "--token flag") {
+		t.Errorf("expected error to identify source '--token flag', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("expected error containing 'empty', got: %v", err)
 	}
 }
 
