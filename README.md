@@ -66,6 +66,8 @@ Supported browsers:
 - Chromium
 - Edge
 - Firefox
+- Opera
+- Safari
 
 Supported platforms:
 - macOS

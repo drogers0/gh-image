@@ -11,11 +11,13 @@ import (
 	_ "github.com/browserutils/kooky/browser/chromium"
 	_ "github.com/browserutils/kooky/browser/edge"
 	_ "github.com/browserutils/kooky/browser/firefox"
+	_ "github.com/browserutils/kooky/browser/opera"
+	_ "github.com/browserutils/kooky/browser/safari"
 )
 
 // GetGitHubSession returns the user_session cookie for github.com.
-// It searches Chrome, Brave, Edge, Chromium, and Firefox (via kooky's registered
-// finders), returning the cookie from the first browser that has one.
+// It searches Chrome, Brave, Edge, Chromium, Firefox, Opera, and Safari (via kooky's
+// registered finders), returning the cookie from the first browser that has one.
 func GetGitHubSession() (*http.Cookie, error) {
 	ctx := context.Background()
 
