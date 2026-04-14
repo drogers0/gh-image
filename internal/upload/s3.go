@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/drogers0/gh-image/internal/httputil"
 )
 
 // uploadToS3 uploads the file to S3 using the presigned form fields from the policy.
@@ -80,7 +82,7 @@ func uploadToS3(policy *policyResponse, filePath, fileName, contentType string) 
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Origin", "https://github.com")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", httputil.UserAgent)
 
 	// S3 upload uses no GitHub cookies — the presigned policy handles auth.
 	resp, err := (&http.Client{Timeout: 120 * time.Second}).Do(req)

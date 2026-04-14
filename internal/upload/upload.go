@@ -14,9 +14,8 @@ import (
 	"time"
 
 	"github.com/drogers0/gh-image/internal/cookies"
+	"github.com/drogers0/gh-image/internal/httputil"
 )
-
-const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 
 // Result holds the output of a successful image upload.
 type Result struct {
@@ -113,7 +112,7 @@ func requestPolicy(client *http.Client, owner, repo, uploadToken string, repoID 
 	req.Header.Set("Origin", "https://github.com")
 	req.Header.Set("Referer", fmt.Sprintf("https://github.com/%s/%s", owner, repo))
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", httputil.UserAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -165,7 +164,7 @@ func finalizeUpload(client *http.Client, owner, repo string, policy *policyRespo
 	req.Header.Set("Origin", "https://github.com")
 	req.Header.Set("Referer", fmt.Sprintf("https://github.com/%s/%s", owner, repo))
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", httputil.UserAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {

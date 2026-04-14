@@ -3,6 +3,7 @@ package cookies
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -41,6 +42,41 @@ func TestSessionCookiePair(t *testing.T) {
 	}
 	if companion.HttpOnly != input.HttpOnly {
 		t.Errorf("expected companion HttpOnly=%v, got %v", input.HttpOnly, companion.HttpOnly)
+	}
+}
+
+func TestNewGitHubCookieJar_ReturnsBothCookies(t *testing.T) {
+	session := &http.Cookie{
+		Name:     "user_session",
+		Value:    "abc123",
+		Domain:   "github.com",
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+	}
+
+	jar := NewGitHubCookieJar(session)
+
+	ghURL, _ := url.Parse("https://github.com")
+	cookies := jar.Cookies(ghURL)
+
+	if len(cookies) != 2 {
+		t.Fatalf("expected 2 cookies in jar, got %d", len(cookies))
+	}
+
+	names := map[string]bool{}
+	for _, c := range cookies {
+		names[c.Name] = true
+		if c.Value != "abc123" {
+			t.Errorf("cookie %q has unexpected value %q", c.Name, c.Value)
+		}
+	}
+
+	if !names["user_session"] {
+		t.Error("jar missing user_session cookie")
+	}
+	if !names["__Host-user_session_same_site"] {
+		t.Error("jar missing __Host-user_session_same_site cookie")
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/drogers0/gh-image/internal/cookies"
+	"github.com/drogers0/gh-image/internal/httputil"
 )
 
 var userLoginRe = regexp.MustCompile(`<meta name="user-login" content="([^"]+)"`)
@@ -47,6 +48,7 @@ func checkValidity(client *http.Client, targetURL string, sessionCookie *http.Co
 	for _, c := range cookies.SessionCookiePair(sessionCookie) {
 		req.AddCookie(c)
 	}
+	req.Header.Set("User-Agent", httputil.UserAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {

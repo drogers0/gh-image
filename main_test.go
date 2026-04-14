@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -62,29 +63,35 @@ func TestCookieFromValue_RejectsEmpty(t *testing.T) {
 
 // TestResolveSessionCookie_FlagPriority verifies --token flag takes highest priority.
 func TestResolveSessionCookie_FlagPriority(t *testing.T) {
-	cookie, err := resolveSessionCookieWithGetter("flag_token", "env_token", nil)
+	cookie, source, err := resolveSessionCookieWithGetter("flag_token", "env_token", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cookie.Value != "flag_token" {
 		t.Errorf("expected flag_token to win, got %q", cookie.Value)
 	}
+	if source != "--token flag" {
+		t.Errorf("expected source %q, got %q", "--token flag", source)
+	}
 }
 
 // TestResolveSessionCookie_EnvFallback verifies GH_SESSION_TOKEN is used when no flag.
 func TestResolveSessionCookie_EnvFallback(t *testing.T) {
-	cookie, err := resolveSessionCookieWithGetter("", "env_token_value", nil)
+	cookie, source, err := resolveSessionCookieWithGetter("", "env_token_value", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cookie.Value != "env_token_value" {
 		t.Errorf("expected env_token_value, got %q", cookie.Value)
 	}
+	if source != "GH_SESSION_TOKEN" {
+		t.Errorf("expected source %q, got %q", "GH_SESSION_TOKEN", source)
+	}
 }
 
 // TestResolveSessionCookie_BrowserFallbackError verifies browser error is wrapped correctly.
 func TestResolveSessionCookie_BrowserFallbackError(t *testing.T) {
-	_, err := resolveSessionCookieWithGetter("", "", func() (*http.Cookie, error) {
+	_, _, err := resolveSessionCookieWithGetter("", "", func() (*http.Cookie, error) {
 		return nil, fmt.Errorf("no browser cookies available")
 	})
 	if err == nil {
@@ -96,7 +103,7 @@ func TestResolveSessionCookie_BrowserFallbackError(t *testing.T) {
 }
 
 func TestResolveSessionCookie_BrowserFallbackSuccess(t *testing.T) {
-	cookie, err := resolveSessionCookieWithGetter("", "", func() (*http.Cookie, error) {
+	cookie, source, err := resolveSessionCookieWithGetter("", "", func() (*http.Cookie, error) {
 		return &http.Cookie{
 			Name:  "user_session",
 			Value: "browser_token",
@@ -110,6 +117,9 @@ func TestResolveSessionCookie_BrowserFallbackSuccess(t *testing.T) {
 	}
 	if cookie.Value != "browser_token" {
 		t.Fatalf("expected browser token, got %q", cookie.Value)
+	}
+	if source != "browser cookies" {
+		t.Errorf("expected source %q, got %q", "browser cookies", source)
 	}
 }
 
@@ -148,9 +158,10 @@ func TestExtractToken_Error(t *testing.T) {
 }
 
 func TestCheckToken_Success(t *testing.T) {
-	username, err := checkToken("sometoken",
-		func(token string) (*http.Cookie, error) {
-			return cookieFromValue(token)
+	username, source, err := checkToken("sometoken",
+		func(token string) (*http.Cookie, string, error) {
+			cookie, err := cookieFromValue(token)
+			return cookie, "--token flag", err
 		},
 		func(c *http.Cookie) (string, error) {
 			return "testuser", nil
@@ -162,12 +173,15 @@ func TestCheckToken_Success(t *testing.T) {
 	if username != "testuser" {
 		t.Errorf("expected 'testuser', got %q", username)
 	}
+	if source != "--token flag" {
+		t.Errorf("expected source %q, got %q", "--token flag", source)
+	}
 }
 
 func TestCheckToken_ResolverError(t *testing.T) {
-	_, err := checkToken("",
-		func(token string) (*http.Cookie, error) {
-			return nil, fmt.Errorf("no token")
+	_, _, err := checkToken("",
+		func(token string) (*http.Cookie, string, error) {
+			return nil, "", fmt.Errorf("no token")
 		},
 		func(c *http.Cookie) (string, error) {
 			return "unused", nil
@@ -179,9 +193,10 @@ func TestCheckToken_ResolverError(t *testing.T) {
 }
 
 func TestCheckToken_ValidatorError(t *testing.T) {
-	_, err := checkToken("sometoken",
-		func(token string) (*http.Cookie, error) {
-			return cookieFromValue(token)
+	_, _, err := checkToken("sometoken",
+		func(token string) (*http.Cookie, string, error) {
+			cookie, err := cookieFromValue(token)
+			return cookie, "--token flag", err
 		},
 		func(c *http.Cookie) (string, error) {
 			return "", fmt.Errorf("token expired")
@@ -194,7 +209,7 @@ func TestCheckToken_ValidatorError(t *testing.T) {
 
 func TestResolveSessionCookie_WhitespaceEnvVar(t *testing.T) {
 	browserCalled := false
-	_, err := resolveSessionCookieWithGetter("", "   ", func() (*http.Cookie, error) {
+	_, _, err := resolveSessionCookieWithGetter("", "   ", func() (*http.Cookie, error) {
 		browserCalled = true
 		return &http.Cookie{Name: "user_session", Value: "browser_token"}, nil
 	})
@@ -213,7 +228,7 @@ func TestResolveSessionCookie_WhitespaceEnvVar(t *testing.T) {
 }
 
 func TestResolveSessionCookie_WhitespaceFlag(t *testing.T) {
-	_, err := resolveSessionCookieWithGetter("   ", "env_token", nil)
+	_, _, err := resolveSessionCookieWithGetter("   ", "env_token", nil)
 	if err == nil {
 		t.Fatal("expected error for whitespace-only flag token, got nil")
 	}
@@ -234,6 +249,7 @@ func TestClassifySubcommand(t *testing.T) {
 		repoSet                 bool
 		wantSubcommand          string
 		wantErrContains         string
+		wantUsageError          bool
 	}{
 		{
 			name:           "extract-token selected",
@@ -261,11 +277,13 @@ func TestClassifySubcommand(t *testing.T) {
 			name:            "extract-token with extra args errors",
 			imagePaths:      []string{"extract-token", "extra"},
 			wantErrContains: "does not take positional arguments",
+			wantUsageError:  true,
 		},
 		{
 			name:            "check-token with extra args errors",
 			imagePaths:      []string{"check-token", "extra"},
 			wantErrContains: "does not take positional arguments",
+			wantUsageError:  true,
 		},
 		{
 			name:            "extract-token with token flag errors",
@@ -301,6 +319,13 @@ func TestClassifySubcommand(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), tc.wantErrContains) {
 					t.Fatalf("expected error containing %q, got %q", tc.wantErrContains, err.Error())
+				}
+				var ue *usageError
+				if tc.wantUsageError && !errors.As(err, &ue) {
+					t.Error("expected usageError, but errors.As did not match")
+				}
+				if !tc.wantUsageError && errors.As(err, &ue) {
+					t.Error("unexpected usageError")
 				}
 				return
 			}

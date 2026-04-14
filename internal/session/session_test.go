@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/drogers0/gh-image/internal/httputil"
 )
 
 // noRedirectClient returns the httptest server's TLS client with redirect
@@ -147,6 +149,28 @@ func TestCheckValidity_RedirectStatusCodes(t *testing.T) {
 				t.Errorf("error should not contain %q, got: %v", tc.wantNotContains, err)
 			}
 		})
+	}
+}
+
+func TestCheckValidity_SetsUserAgent(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cookie := &http.Cookie{Name: "user_session", Value: "testtoken"}
+
+	username, err := checkValidity(noRedirectClient(srv), srv.URL+"/settings/profile", cookie)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if username != "" {
+		t.Errorf("expected empty username, got %q", username)
+	}
+	if gotUA != httputil.UserAgent {
+		t.Errorf("want User-Agent %q, got %q", httputil.UserAgent, gotUA)
 	}
 }
 
