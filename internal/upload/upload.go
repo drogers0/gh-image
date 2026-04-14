@@ -8,15 +8,14 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/http/cookiejar"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
-)
 
-const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+	"github.com/drogers0/gh-image/internal/cookies"
+	"github.com/drogers0/gh-image/internal/httputil"
+)
 
 // Result holds the output of a successful image upload.
 type Result struct {
@@ -43,18 +42,10 @@ type policyResponse struct {
 // GitHub requires both user_session and __Host-user_session_same_site
 // for CSRF validation on the upload endpoint.
 func NewClient(sessionCookie *http.Cookie) *http.Client {
-	jar, _ := cookiejar.New(nil)
-	ghURL, _ := url.Parse("https://github.com")
-	sameSiteCookie := &http.Cookie{
-		Name:     "__Host-user_session_same_site",
-		Value:    sessionCookie.Value,
-		Domain:   "github.com",
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
+	return &http.Client{
+		Jar:     cookies.NewGitHubCookieJar(sessionCookie),
+		Timeout: 30 * time.Second,
 	}
-	jar.SetCookies(ghURL, []*http.Cookie{sessionCookie, sameSiteCookie})
-	return &http.Client{Jar: jar, Timeout: 30 * time.Second}
 }
 
 // Upload uploads an image file to GitHub and returns the asset URL.
@@ -121,7 +112,7 @@ func requestPolicy(client *http.Client, owner, repo, uploadToken string, repoID 
 	req.Header.Set("Origin", "https://github.com")
 	req.Header.Set("Referer", fmt.Sprintf("https://github.com/%s/%s", owner, repo))
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", httputil.UserAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -173,7 +164,7 @@ func finalizeUpload(client *http.Client, owner, repo string, policy *policyRespo
 	req.Header.Set("Origin", "https://github.com")
 	req.Header.Set("Referer", fmt.Sprintf("https://github.com/%s/%s", owner, repo))
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", httputil.UserAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {

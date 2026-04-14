@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+
+	"github.com/drogers0/gh-image/internal/httputil"
 )
 
 var uploadTokenRe = regexp.MustCompile(`"uploadToken":"([^"]+)"`)
@@ -18,7 +20,7 @@ func GetUploadToken(client *http.Client, owner, repo string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", httputil.UserAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
