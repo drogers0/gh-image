@@ -65,6 +65,7 @@ Supported browsers:
 - Brave
 - Chromium
 - Edge
+- Firefox
 
 Supported platforms:
 - macOS
