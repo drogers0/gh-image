@@ -231,6 +231,7 @@ func TestClassifySubcommand(t *testing.T) {
 		imagePaths              []string
 		firstPosAfterDoubleDash bool
 		tokenFlag               string
+		repoSet                 bool
 		wantSubcommand          string
 		wantErrContains         string
 	}{
@@ -277,11 +278,23 @@ func TestClassifySubcommand(t *testing.T) {
 			imagePaths:     []string{"image.png"},
 			wantSubcommand: "",
 		},
+		{
+			name:            "extract-token with repo flag errors",
+			imagePaths:      []string{"extract-token"},
+			repoSet:         true,
+			wantErrContains: "--repo cannot be combined with extract-token",
+		},
+		{
+			name:            "check-token with repo flag errors",
+			imagePaths:      []string{"check-token"},
+			repoSet:         true,
+			wantErrContains: "--repo cannot be combined with check-token",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotSubcommand, err := classifySubcommand(tc.imagePaths, tc.firstPosAfterDoubleDash, tc.tokenFlag)
+			gotSubcommand, err := classifySubcommand(tc.imagePaths, tc.firstPosAfterDoubleDash, tc.tokenFlag, tc.repoSet)
 			if tc.wantErrContains != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErrContains)

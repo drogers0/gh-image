@@ -36,23 +36,6 @@ func TestCheckValidity_Valid(t *testing.T) {
 	}
 }
 
-func TestCheckValidity_Invalid(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/login", http.StatusFound)
-	}))
-	defer srv.Close()
-
-	cookie := &http.Cookie{Name: "user_session", Value: "badtoken"}
-
-	_, err := checkValidity(noRedirectClient(srv), srv.URL+"/settings/profile", cookie)
-	if err == nil {
-		t.Fatal("expected error for invalid token, got nil")
-	}
-	if !strings.Contains(err.Error(), "invalid or expired") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
 func TestCheckValidity_ValidNoUsername(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -106,6 +89,64 @@ func TestCheckValidity_EmptyCookieValue(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "empty") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestCheckValidity_RedirectStatusCodes(t *testing.T) {
+	tests := []struct {
+		name            string
+		statusCode      int
+		wantErrContains string
+		wantNotContains string
+	}{
+		{
+			name:            "302 is invalid token",
+			statusCode:      http.StatusFound,
+			wantErrContains: "invalid or expired",
+		},
+		{
+			name:            "303 is invalid token",
+			statusCode:      http.StatusSeeOther,
+			wantErrContains: "invalid or expired",
+		},
+		{
+			name:            "301 is unexpected status",
+			statusCode:      http.StatusMovedPermanently,
+			wantErrContains: "unexpected status",
+			wantNotContains: "invalid or expired",
+		},
+		{
+			name:            "307 is unexpected status",
+			statusCode:      http.StatusTemporaryRedirect,
+			wantErrContains: "unexpected status",
+			wantNotContains: "invalid or expired",
+		},
+		{
+			name:            "308 is unexpected status",
+			statusCode:      http.StatusPermanentRedirect,
+			wantErrContains: "unexpected status",
+			wantNotContains: "invalid or expired",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/other", tc.statusCode)
+			}))
+			defer srv.Close()
+
+			cookie := &http.Cookie{Name: "user_session", Value: "testtoken"}
+			_, err := checkValidity(noRedirectClient(srv), srv.URL+"/settings/profile", cookie)
+			if err == nil {
+				t.Fatalf("expected error for status %d, got nil", tc.statusCode)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrContains) {
+				t.Errorf("expected error containing %q, got: %v", tc.wantErrContains, err)
+			}
+			if tc.wantNotContains != "" && strings.Contains(err.Error(), tc.wantNotContains) {
+				t.Errorf("error should not contain %q, got: %v", tc.wantNotContains, err)
+			}
+		})
 	}
 }
 

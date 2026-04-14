@@ -72,7 +72,7 @@ func main() {
 				os.Exit(1)
 			}
 			i++
-			tokenFlag = args[i]
+			tokenFlag = strings.TrimSpace(args[i])
 			if tokenFlag == "" {
 				fmt.Fprintf(os.Stderr, "Error: --token value cannot be empty\n%s\n", usage)
 				os.Exit(1)
@@ -83,7 +83,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error: --token specified more than once\n")
 				os.Exit(1)
 			}
-			tokenFlag = strings.SplitN(arg, "=", 2)[1]
+			tokenFlag = strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
 			if tokenFlag == "" {
 				fmt.Fprintf(os.Stderr, "Error: --token value cannot be empty\n%s\n", usage)
 				os.Exit(1)
@@ -123,7 +123,7 @@ func main() {
 	}
 
 	// Dispatch subcommands before any other validation.
-	subcommand, dispatchErr := classifySubcommand(imagePaths, firstPosAfterDoubleDash, tokenFlag)
+	subcommand, dispatchErr := classifySubcommand(imagePaths, firstPosAfterDoubleDash, tokenFlag, repoSet)
 	if dispatchErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", dispatchErr)
 		if strings.Contains(dispatchErr.Error(), "does not take positional arguments") {
@@ -201,7 +201,7 @@ func main() {
 
 // classifySubcommand identifies whether the parsed positional args represent a
 // supported subcommand invocation and validates subcommand-specific constraints.
-func classifySubcommand(imagePaths []string, firstPosAfterDoubleDash bool, tokenFlag string) (string, error) {
+func classifySubcommand(imagePaths []string, firstPosAfterDoubleDash bool, tokenFlag string, repoSet bool) (string, error) {
 	if len(imagePaths) == 0 || firstPosAfterDoubleDash {
 		return "", nil
 	}
@@ -213,10 +213,16 @@ func classifySubcommand(imagePaths []string, firstPosAfterDoubleDash bool, token
 		if tokenFlag != "" {
 			return "", fmt.Errorf("--token cannot be combined with extract-token (extract-token always reads from browser)")
 		}
+		if repoSet {
+			return "", fmt.Errorf("--repo cannot be combined with extract-token")
+		}
 		return "extract-token", nil
 	case "check-token":
 		if len(imagePaths) > 1 {
 			return "", fmt.Errorf("check-token does not take positional arguments")
+		}
+		if repoSet {
+			return "", fmt.Errorf("--repo cannot be combined with check-token")
 		}
 		return "check-token", nil
 	default:
@@ -292,7 +298,6 @@ func handleExtractToken() {
 	}
 	fmt.Fprintln(os.Stderr, "Extracted session token from browser cookies")
 	fmt.Println(value)
-	os.Exit(0)
 }
 
 // checkToken resolves and validates a session token, returning the authenticated username.
@@ -316,5 +321,4 @@ func handleCheckToken(tokenFlag string) {
 	if username != "" {
 		fmt.Println(username)
 	}
-	os.Exit(0)
 }

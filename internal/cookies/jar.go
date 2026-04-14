@@ -28,6 +28,8 @@ func SessionCookiePair(sessionCookie *http.Cookie) [2]*http.Cookie {
 // NewGitHubCookieJar creates a cookie jar pre-loaded with the given session
 // cookie and its __Host-user_session_same_site counterpart, both set on
 // https://github.com. GitHub requires both cookies for CSRF validation.
+//
+// Panics if sessionCookie is nil.
 func NewGitHubCookieJar(sessionCookie *http.Cookie) http.CookieJar {
 	// cookiejar.New only errors when Options is non-nil and has an invalid
 	// PublicSuffixList; passing nil is always safe.

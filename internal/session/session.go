@@ -57,7 +57,7 @@ func checkValidity(client *http.Client, targetURL string, sessionCookie *http.Co
 	switch resp.StatusCode {
 	case http.StatusOK:
 		// Continue below to parse the response body.
-	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+	case http.StatusFound, http.StatusSeeOther:
 		return "", fmt.Errorf("token is invalid or expired (status %d)", resp.StatusCode)
 	default:
 		return "", fmt.Errorf("unexpected status while validating token: %d", resp.StatusCode)
