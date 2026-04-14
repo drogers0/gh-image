@@ -75,6 +75,10 @@ Supported platforms:
 
 The tool supports providing your own session token instead of reading from the browser. This enables use in environments where browser cookies are unavailable (such as CI).
 
+> **Warning:** `user_session` cookies grant full account access — they are not
+> scoped like personal access tokens. Treat them with the same care as a password.
+> Rotate promptly if leaked.
+
 **Token resolution order (highest priority first):**
 
 1. `--token <value>` flag
@@ -92,9 +96,6 @@ GH_SESSION_TOKEN="$MY_TOKEN" gh image screenshot.png --repo owner/repo
 > **Security note:** `--token` values are visible in process listings (`ps aux`).
 > Use the `GH_SESSION_TOKEN` environment variable on shared machines.
 
-> **Warning:** `user_session` cookies grant full account access — they are not
-> scoped like personal access tokens. Treat them with the same care as a password.
-> Rotate promptly if leaked.
 
 ## Token Utilities
 
