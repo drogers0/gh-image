@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
-	"net/url"
 	"regexp"
 	"time"
 )
@@ -27,31 +25,32 @@ func CheckValidity(sessionCookie *http.Cookie) (string, error) {
 		return "", fmt.Errorf("session token is empty")
 	}
 
-	// cookiejar.New only errors when Options is non-nil and has an invalid
-	// PublicSuffixList; passing nil is always safe.
-	jar, _ := cookiejar.New(nil)
-	// url.Parse with a hardcoded, valid URL never returns an error.
-	ghURL, _ := url.Parse("https://github.com")
-
-	sameSiteCookie := &http.Cookie{
-		Name:     "__Host-user_session_same_site",
-		Value:    sessionCookie.Value,
-		Domain:   "github.com",
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
-	}
-	jar.SetCookies(ghURL, []*http.Cookie{sessionCookie, sameSiteCookie})
-
 	client := &http.Client{
-		Jar:     jar,
 		Timeout: 15 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
+	return checkValidity(client, "https://github.com/settings/profile", sessionCookie)
+}
 
-	resp, err := client.Get("https://github.com/settings/profile")
+// checkValidity does the real work of validating a session cookie against a
+// target URL. The exported CheckValidity calls this with production defaults.
+// Tests call this directly with httptest servers and custom clients.
+func checkValidity(client *http.Client, targetURL string, sessionCookie *http.Cookie) (string, error) {
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate token: %w", err)
+	}
+	// Attach cookies directly on the request so they work with
+	// non-github.com hosts (e.g., httptest servers in tests).
+	req.AddCookie(sessionCookie)
+	req.AddCookie(&http.Cookie{
+		Name:  "__Host-user_session_same_site",
+		Value: sessionCookie.Value,
+	})
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to validate token: %w", err)
 	}
@@ -67,7 +66,7 @@ func CheckValidity(sessionCookie *http.Cookie) (string, error) {
 	}
 
 	// Best-effort username extraction from the 200 response body.
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
 	if err != nil {
 		// We already confirmed 200, so return empty username rather than failing.
 		return "", nil

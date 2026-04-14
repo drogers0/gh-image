@@ -21,6 +21,7 @@ func main() {
 	var repoFlag string
 	var repoSet bool
 	var tokenFlag string
+	var tokenSet bool
 	var imagePaths []string
 	var firstPosAfterDoubleDash bool
 
@@ -62,14 +63,24 @@ func main() {
 			repoFlag = strings.SplitN(arg, "=", 2)[1]
 			repoSet = true
 		case arg == "--token":
+			if tokenSet {
+				fmt.Fprintf(os.Stderr, "Error: --token specified more than once\n")
+				os.Exit(1)
+			}
 			if i+1 >= len(args) {
 				fmt.Fprintf(os.Stderr, "Error: --token requires a value\n%s\n", usage)
 				os.Exit(1)
 			}
 			i++
 			tokenFlag = args[i]
+			tokenSet = true
 		case strings.HasPrefix(arg, "--token="):
+			if tokenSet {
+				fmt.Fprintf(os.Stderr, "Error: --token specified more than once\n")
+				os.Exit(1)
+			}
 			tokenFlag = strings.SplitN(arg, "=", 2)[1]
+			tokenSet = true
 		case arg == "--help" || arg == "-h":
 			fmt.Printf("%s\n\n", usage)
 			fmt.Println("Upload images to GitHub and print markdown references.")
@@ -101,6 +112,11 @@ func main() {
 		default:
 			imagePaths = append(imagePaths, arg)
 		}
+	}
+
+	if tokenSet && strings.TrimSpace(tokenFlag) == "" {
+		fmt.Fprintf(os.Stderr, "Error: --token value cannot be empty\n")
+		os.Exit(1)
 	}
 
 	// Dispatch subcommands before any other validation.
@@ -244,28 +260,41 @@ func cookieFromValue(value string) (*http.Cookie, error) {
 	}, nil
 }
 
+// extractToken extracts a session token from the browser and returns the raw value.
+func extractToken(getBrowserCookie func() (*http.Cookie, error)) (string, error) {
+	cookie, err := getBrowserCookie()
+	if err != nil {
+		return "", err
+	}
+	return cookie.Value, nil
+}
+
 // handleExtractToken extracts the session cookie from the browser and prints
 // the raw token value to stdout. Source info is written to stderr.
 func handleExtractToken() {
-	cookie, err := cookies.GetGitHubSession()
+	value, err := extractToken(cookies.GetGitHubSession)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stderr, "Extracted session token from browser cookies")
-	fmt.Println(cookie.Value)
+	fmt.Println(value)
 	os.Exit(0)
+}
+
+// checkToken resolves and validates a session token, returning the authenticated username.
+func checkToken(tokenFlag string, resolver func(string) (*http.Cookie, error), validator func(*http.Cookie) (string, error)) (string, error) {
+	cookie, err := resolver(tokenFlag)
+	if err != nil {
+		return "", err
+	}
+	return validator(cookie)
 }
 
 // handleCheckToken verifies the session cookie and prints the username to stdout.
 // Token source is resolved via resolveSessionCookie (flag > env var > browser).
 func handleCheckToken(tokenFlag string) {
-	cookie, err := resolveSessionCookie(tokenFlag)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	username, err := session.CheckValidity(cookie)
+	username, err := checkToken(tokenFlag, resolveSessionCookie, session.CheckValidity)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

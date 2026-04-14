@@ -62,8 +62,7 @@ func TestCookieFromValue_RejectsEmpty(t *testing.T) {
 
 // TestResolveSessionCookie_FlagPriority verifies --token flag takes highest priority.
 func TestResolveSessionCookie_FlagPriority(t *testing.T) {
-	t.Setenv("GH_SESSION_TOKEN", "env_token")
-	cookie, err := resolveSessionCookie("flag_token")
+	cookie, err := resolveSessionCookieWithGetter("flag_token", "env_token", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,8 +73,7 @@ func TestResolveSessionCookie_FlagPriority(t *testing.T) {
 
 // TestResolveSessionCookie_EnvFallback verifies GH_SESSION_TOKEN is used when no flag.
 func TestResolveSessionCookie_EnvFallback(t *testing.T) {
-	t.Setenv("GH_SESSION_TOKEN", "env_token_value")
-	cookie, err := resolveSessionCookie("")
+	cookie, err := resolveSessionCookieWithGetter("", "env_token_value", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,6 +123,89 @@ func TestCookieFromValue_UsableByNewClient(t *testing.T) {
 	client := upload.NewClient(cookie)
 	if client == nil {
 		t.Fatal("expected upload.NewClient to return a non-nil client")
+	}
+}
+
+func TestExtractToken_Success(t *testing.T) {
+	value, err := extractToken(func() (*http.Cookie, error) {
+		return &http.Cookie{Name: "user_session", Value: "browser_abc"}, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if value != "browser_abc" {
+		t.Errorf("expected 'browser_abc', got %q", value)
+	}
+}
+
+func TestExtractToken_Error(t *testing.T) {
+	_, err := extractToken(func() (*http.Cookie, error) {
+		return nil, fmt.Errorf("no cookies")
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestCheckToken_Success(t *testing.T) {
+	username, err := checkToken("sometoken",
+		func(token string) (*http.Cookie, error) {
+			return cookieFromValue(token)
+		},
+		func(c *http.Cookie) (string, error) {
+			return "testuser", nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if username != "testuser" {
+		t.Errorf("expected 'testuser', got %q", username)
+	}
+}
+
+func TestCheckToken_ResolverError(t *testing.T) {
+	_, err := checkToken("",
+		func(token string) (*http.Cookie, error) {
+			return nil, fmt.Errorf("no token")
+		},
+		func(c *http.Cookie) (string, error) {
+			return "unused", nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestCheckToken_ValidatorError(t *testing.T) {
+	_, err := checkToken("sometoken",
+		func(token string) (*http.Cookie, error) {
+			return cookieFromValue(token)
+		},
+		func(c *http.Cookie) (string, error) {
+			return "", fmt.Errorf("token expired")
+		},
+	)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestResolveSessionCookie_WhitespaceEnvVar(t *testing.T) {
+	browserCalled := false
+	_, err := resolveSessionCookieWithGetter("", "   ", func() (*http.Cookie, error) {
+		browserCalled = true
+		return &http.Cookie{Name: "user_session", Value: "browser_token"}, nil
+	})
+	if err == nil {
+		t.Fatal("expected error for whitespace-only env token, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("expected error containing 'empty', got: %v", err)
+	}
+	if browserCalled {
+		t.Error("whitespace-only env token should not fall through to browser getter")
 	}
 }
 

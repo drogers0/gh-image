@@ -1,14 +1,22 @@
 package session
 
 import (
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+// noRedirectClient returns the httptest server's TLS client with redirect
+// following disabled, matching the production CheckValidity configuration.
+func noRedirectClient(srv *httptest.Server) *http.Client {
+	client := srv.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return client
+}
 
 func TestCheckValidity_Valid(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -17,7 +25,9 @@ func TestCheckValidity_Valid(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	username, err := checkValidityWithURL(srv.Client(), srv.URL+"/settings/profile", "testtoken")
+	cookie := &http.Cookie{Name: "user_session", Value: "testtoken"}
+
+	username, err := checkValidity(noRedirectClient(srv), srv.URL+"/settings/profile", cookie)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -32,7 +42,9 @@ func TestCheckValidity_Invalid(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := checkValidityWithURL(srv.Client(), srv.URL+"/settings/profile", "badtoken")
+	cookie := &http.Cookie{Name: "user_session", Value: "badtoken"}
+
+	_, err := checkValidity(noRedirectClient(srv), srv.URL+"/settings/profile", cookie)
 	if err == nil {
 		t.Fatal("expected error for invalid token, got nil")
 	}
@@ -48,7 +60,9 @@ func TestCheckValidity_ValidNoUsername(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	username, err := checkValidityWithURL(srv.Client(), srv.URL+"/settings/profile", "validtoken")
+	cookie := &http.Cookie{Name: "user_session", Value: "validtoken"}
+
+	username, err := checkValidity(noRedirectClient(srv), srv.URL+"/settings/profile", cookie)
 	if err != nil {
 		t.Fatalf("expected no error even with missing username meta, got: %v", err)
 	}
@@ -58,7 +72,15 @@ func TestCheckValidity_ValidNoUsername(t *testing.T) {
 }
 
 func TestCheckValidity_NetworkError(t *testing.T) {
-	_, err := checkValidityWithURL(nil, "http://127.0.0.1:1", "anytoken")
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	cookie := &http.Cookie{Name: "user_session", Value: "anytoken"}
+
+	_, err := checkValidity(client, "http://127.0.0.1:1/settings/profile", cookie)
 	if err == nil {
 		t.Fatal("expected error for unreachable server, got nil")
 	}
@@ -93,84 +115,13 @@ func TestCheckValidity_UnexpectedStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := checkValidityWithURL(srv.Client(), srv.URL+"/settings/profile", "testtoken")
+	cookie := &http.Cookie{Name: "user_session", Value: "testtoken"}
+
+	_, err := checkValidity(noRedirectClient(srv), srv.URL+"/settings/profile", cookie)
 	if err == nil {
 		t.Fatal("expected error for unexpected status, got nil")
 	}
 	if !strings.Contains(err.Error(), "unexpected status while validating token") {
 		t.Errorf("unexpected error message: %v", err)
 	}
-}
-
-// checkValidityWithURL is a testable variant of CheckValidity that accepts an
-// injected HTTP client and a custom URL, so tests can use httptest servers.
-func checkValidityWithURL(httpClient *http.Client, targetURL, tokenValue string) (string, error) {
-	cookie := &http.Cookie{
-		Name:     "user_session",
-		Value:    tokenValue,
-		Domain:   "github.com",
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
-	}
-
-	sameSite := &http.Cookie{
-		Name:     "__Host-user_session_same_site",
-		Value:    tokenValue,
-		Domain:   "github.com",
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
-	}
-
-	if httpClient == nil {
-		httpClient = &http.Client{
-			Timeout: 2 * time.Second,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-	} else {
-		// Wrap the provided client to disable redirect following.
-		orig := *httpClient
-		orig.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
-		httpClient = &orig
-	}
-
-	// Build a request manually so we can attach cookies without a jar
-	// (jar won't match non-github.com domains used in tests).
-	req, err := http.NewRequest("GET", targetURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.AddCookie(cookie)
-	req.AddCookie(sameSite)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to validate token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		// Continue below to parse body.
-	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-		return "", fmt.Errorf("token is invalid or expired (status %d)", resp.StatusCode)
-	default:
-		return "", fmt.Errorf("unexpected status while validating token: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", nil
-	}
-
-	match := userLoginRe.FindSubmatch(body)
-	if match == nil {
-		return "", nil
-	}
-	return string(match[1]), nil
 }
