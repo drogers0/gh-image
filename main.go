@@ -134,8 +134,10 @@ func main() {
 	switch subcommand {
 	case "extract-token":
 		handleExtractToken()
+		return
 	case "check-token":
 		handleCheckToken(tokenFlag)
+		return
 	}
 
 	if len(imagePaths) == 0 {
@@ -311,6 +313,8 @@ func handleCheckToken(tokenFlag string) {
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stderr, "Token is valid")
-	fmt.Println(username)
+	if username != "" {
+		fmt.Println(username)
+	}
 	os.Exit(0)
 }
