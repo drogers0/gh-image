@@ -91,6 +91,9 @@ Happens consistently after the third click."
 
 On macOS, a Keychain prompt may appear on first use to authorize access to your browser's cookie encryption key. Click **Always Allow** to skip future prompts.
 
+> [!NOTE]
+> **Windows + Chrome 127+:** Some versions of Chrome on Windows are not yet supported by the underlying cookie library.
+
 ### Session token override
 
 For CI, headless environments, or shared machines, you can supply the session token explicitly. Resolution order (first match wins):
@@ -118,7 +121,7 @@ GH_SESSION_TOKEN="$MY_TOKEN" gh image screenshot.png --repo owner/repo
 `gh-image` runs unattended in GitHub Actions when given a session token via `GH_SESSION_TOKEN`.
 
 > [!CAUTION]
-> **Use a dedicated bot account on shared repos.** GitHub hides secret values in the UI and masks log emissions, but a determined collaborator with write access can craft a workflow that exfiltrates the value through channels masking doesn't cover. Storing your *personal* `user_session` means such a leak compromises your account; a bot account scopes the blast radius to that bot. Decide whose token to extract in step 1 below accordingly.
+> **Use a dedicated bot account for CI/CD on shared repos.** GitHub hides secret values in the UI and masks log emissions, but a determined collaborator with write access can craft a workflow that exfiltrates the value through channels masking doesn't cover. Storing your *personal* `user_session` means such a leak compromises your account; a bot account scopes the blast radius to that bot. Decide whose token to extract in step 1 below accordingly.
 
 **Setup**
 

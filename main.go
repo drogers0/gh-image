@@ -16,7 +16,11 @@ import (
 const usage = `Usage:
   gh image [--repo owner/repo] [--token <value>] <image-path>...
   gh image extract-token
-  gh image check-token [--token <value>]`
+  gh image check-token [--token <value>]
+  gh image --version`
+
+// version is set via -ldflags "-X main.version=..." at release build time.
+var version = "dev"
 
 func main() {
 	var repoFlag string
@@ -90,6 +94,9 @@ func main() {
 				os.Exit(1)
 			}
 			tokenSet = true
+		case arg == "--version":
+			fmt.Printf("gh-image %s\n", version)
+			os.Exit(0)
 		case arg == "--help" || arg == "-h":
 			fmt.Printf("%s\n\n", usage)
 			fmt.Println("Upload images to GitHub and print markdown references.")
@@ -103,6 +110,7 @@ func main() {
 			fmt.Println("                      Can also be set via GH_SESSION_TOKEN environment variable")
 			fmt.Println("                      WARNING: --token values are visible in process listings.")
 			fmt.Println("                      Prefer GH_SESSION_TOKEN on shared machines.")
+			fmt.Println("  --version           Print version and exit")
 			fmt.Println()
 			fmt.Println("Subcommands:")
 			fmt.Println("  extract-token       Extract session token from browser and print to stdout")
