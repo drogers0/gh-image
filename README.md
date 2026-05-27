@@ -92,7 +92,7 @@ Happens consistently after the third click."
 On macOS, a Keychain prompt may appear on first use to authorize access to your browser's cookie encryption key. Click **Always Allow** to skip future prompts.
 
 > [!NOTE]
-> **Windows + Chrome 127+:** Some versions of Chrome on Windows are not yet supported by the underlying cookie library.
+> **Windows + Chrome 127+:** Some versions of Chrome on Windows are not yet supported by the underlying cookie library. Use another browser or [investigate potential workarounds](https://github.com/drogers0/gh-image/issues/4).
 
 ### Session token override
 

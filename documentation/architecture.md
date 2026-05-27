@@ -197,53 +197,35 @@ Responsibilities:
 
 ## Data Flow
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  User: gh image screenshot.png another.png --repo o/r       │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-                ┌──────────────────────┐
-                │  Resolve Session     │
-                │  flag > env > browser│
-                │  (kooky for browser) │
-                └──────────┬───────────┘
-                           │ user_session
-                           ▼
-                ┌──────────────────────┐
-                │  For each image:     │
-                │                      │
-                │  Fetch uploadToken   │
-                │  GET /repo page      │
-                └──────────┬───────────┘
-                           │ uploadToken
-                           ▼
-                ┌──────────────────────┐
-                │  Request Policy      │
-                │  POST /upload/       │
-                │  policies/assets     │
-                └──────────┬───────────┘
-                           │ S3 presigned form
-                           │ asset_upload_authenticity_token
-                           ▼
-                ┌──────────────────────┐
-                │  Upload to S3        │
-                │  POST policy.upload_ │
-                │  url (no GitHub auth)│
-                └──────────┬───────────┘
-                           │ 200 / 201 / 204
-                           ▼
-                ┌──────────────────────┐
-                │  Finalize            │
-                │  PUT /upload/        │
-                │  assets/{id}         │
-                └───────────┬──────────┘
-                           │ asset href URL
-                           ▼
-                ┌──────────────────────┐
-                │  Print markdown      │
-                │  to stdout           │
-                └──────────────────────┘
+```mermaid
+flowchart TD
+    Start(["<b>User:</b> gh image screenshot.png another.png --repo o/r"])
+    Session["<b>Resolve Session</b><br/>flag → env → browser<br/><i>(kooky for browser)</i>"]
+
+    Start --> Session
+
+    subgraph PerImage ["For each image"]
+        direction TB
+        Token["<b>Fetch uploadToken</b><br/>GET /:owner/:repo"]
+        Policy["<b>Request Policy</b><br/>POST /upload/policies/assets"]
+        S3["<b>Upload to S3</b><br/>POST policy.upload_url<br/><i>(no GitHub auth)</i>"]
+        Finalize["<b>Finalize</b><br/>PUT /upload/assets/:id"]
+        Print["<b>Print markdown</b><br/>to stdout"]
+
+        Token -- "uploadToken" --> Policy
+        Policy -- "S3 presigned form +<br/>asset_upload_authenticity_token" --> S3
+        S3 -- "200 / 201 / 204" --> Finalize
+        Finalize -- "asset href URL" --> Print
+    end
+
+    Session -- "user_session" --> Token
+
+    classDef ghAuth fill:#e8f0ff,stroke:#4a6fa5,color:#000
+    classDef s3 fill:#fff4e0,stroke:#c08a2e,color:#000
+    classDef terminal fill:#e8f5e8,stroke:#5a8a5a,color:#000
+    class Session,Token,Policy,Finalize ghAuth
+    class S3 s3
+    class Start,Print terminal
 ```
 
 ## Authentication Model
