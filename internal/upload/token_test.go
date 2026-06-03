@@ -81,7 +81,7 @@ func TestGetUploadToken(t *testing.T) {
 			name:        "SAML interstitial gives an actionable SSO error, not write-access",
 			owner:       "GymPod",
 			body:        `<title>Sign in to GymPod</title><a href="/orgs/GymPod/sso">Single sign-on</a>`,
-			errContains: []string{"SAML SSO", "/orgs/GymPod/sso", "NOT a write-access problem"},
+			errContains: []string{"SAML SSO", "/orgs/GymPod/sso", "Write access alone is not enough"},
 			errExcludes: []string{"do you have write access to GymPod"},
 		},
 		{

@@ -65,11 +65,10 @@ func GetUploadToken(client *http.Client, owner, repo string) (string, error) {
 		if isSAMLProtected(body, owner) {
 			return "", fmt.Errorf("%s enforces SAML SSO and your session is not authorized for it — "+
 				"authorize in a browser at https://github.com/orgs/%s/sso (lasts ~24h), then retry. "+
-				"This is NOT a write-access problem, and copying additional cookies cannot fix it "+
-				"(the SSO grant is server-side)", owner, owner)
+				"Write access alone is not enough", owner, owner)
 		}
 		return "", fmt.Errorf("uploadToken not found on repo page — do you have write access to %s/%s? "+
-			"(if %s enforces SAML SSO, authorize your session at https://github.com/orgs/%s/sso and retry)",
+			"(or, if %s enforces SAML SSO, authorize at https://github.com/orgs/%s/sso)",
 			owner, repo, owner, owner)
 	}
 
