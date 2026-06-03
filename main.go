@@ -247,8 +247,16 @@ func classifySubcommand(imagePaths []string, firstPosAfterDoubleDash bool, token
 
 // resolveSessionCookie returns a GitHub session cookie using the first available
 // source: --token flag, GH_SESSION_TOKEN environment variable, or browser extraction.
+// The browser getter validates candidates against GitHub when more than one
+// logged-in session exists, so a stale/logged-out cookie isn't picked over a live one.
 func resolveSessionCookie(tokenFlag string) (*http.Cookie, string, error) {
-	return resolveSessionCookieWithGetter(tokenFlag, os.Getenv("GH_SESSION_TOKEN"), cookies.GetGitHubSession)
+	get := func() (*http.Cookie, error) {
+		return cookies.GetGitHubSession(func(c *http.Cookie) error {
+			_, err := session.CheckValidity(c)
+			return err
+		})
+	}
+	return resolveSessionCookieWithGetter(tokenFlag, os.Getenv("GH_SESSION_TOKEN"), get)
 }
 
 // resolveSessionCookieWithGetter is a testable variant of resolveSessionCookie
@@ -285,14 +293,7 @@ func cookieFromValue(value string) (*http.Cookie, error) {
 	if value == "" {
 		return nil, fmt.Errorf("session token is empty")
 	}
-	return &http.Cookie{
-		Name:     "user_session",
-		Value:    value,
-		Domain:   "github.com",
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
-	}, nil
+	return cookies.NewSessionCookie(value), nil
 }
 
 // extractToken extracts a session token from the browser and returns the raw value.
@@ -307,7 +308,8 @@ func extractToken(getBrowserCookie func() (*http.Cookie, error)) (string, error)
 // handleExtractToken extracts the session cookie from the browser and prints
 // the raw token value to stdout. Source info is written to stderr.
 func handleExtractToken() {
-	value, err := extractToken(cookies.GetGitHubSession)
+	// extract-token stays offline: pass nil so selection skips network validation.
+	value, err := extractToken(func() (*http.Cookie, error) { return cookies.GetGitHubSession(nil) })
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
