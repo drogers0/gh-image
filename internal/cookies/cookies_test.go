@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 )
 
 func TestNewSessionCookie(t *testing.T) {
@@ -21,8 +20,8 @@ func TestNewSessionCookie(t *testing.T) {
 }
 
 // us and li build github.com rawCookies of each kind for a given store.
-func us(store, value string, creation time.Time) rawCookie {
-	return rawCookie{store: store, domain: "github.com", name: "user_session", value: value, creation: creation}
+func us(store, value string) rawCookie {
+	return rawCookie{store: store, domain: "github.com", name: "user_session", value: value}
 }
 func li(store, value string) rawCookie {
 	return rawCookie{store: store, domain: "github.com", name: "logged_in", value: value}
@@ -39,7 +38,7 @@ func candByStore(cands []sessionCandidate, store string) (sessionCandidate, bool
 
 func TestGroupCandidates(t *testing.T) {
 	t.Run("single logged-in store", func(t *testing.T) {
-		got := groupCandidates([]rawCookie{us("A", "tok", time.Time{}), li("A", "yes")})
+		got := groupCandidates([]rawCookie{us("A", "tok"), li("A", "yes")})
 		if len(got) != 1 || !got[0].loggedIn || got[0].cookie.Value != "tok" {
 			t.Fatalf("got %+v, want one logged-in candidate with value tok", got)
 		}
@@ -47,8 +46,8 @@ func TestGroupCandidates(t *testing.T) {
 
 	t.Run("#15 regression: logged-out store not conflated with logged-in one", func(t *testing.T) {
 		got := groupCandidates([]rawCookie{
-			us("A", "active", time.Time{}), li("A", "yes"),
-			us("B", "stale", time.Time{}), // store B is logged out (no logged_in)
+			us("A", "active"), li("A", "yes"),
+			us("B", "stale"), // store B is logged out (no logged_in)
 		})
 		if len(got) != 2 {
 			t.Fatalf("want 2 candidates, got %d", len(got))
@@ -61,7 +60,7 @@ func TestGroupCandidates(t *testing.T) {
 	})
 
 	t.Run("cross-store guard: logged_in in A must not mark B", func(t *testing.T) {
-		got := groupCandidates([]rawCookie{us("A", "a", time.Time{}), li("A", "yes"), us("B", "b", time.Time{})})
+		got := groupCandidates([]rawCookie{us("A", "a"), li("A", "yes"), us("B", "b")})
 		b, _ := candByStore(got, "B")
 		if b.loggedIn {
 			t.Error("store B wrongly marked logged in by store A's logged_in cookie")
@@ -70,7 +69,7 @@ func TestGroupCandidates(t *testing.T) {
 
 	t.Run("logged_in values other than yes are not logged in", func(t *testing.T) {
 		for _, v := range []string{"no", "", "maybe", "Yes"} {
-			got := groupCandidates([]rawCookie{us("A", "t", time.Time{}), li("A", v)})
+			got := groupCandidates([]rawCookie{us("A", "t"), li("A", v)})
 			if got[0].loggedIn {
 				t.Errorf("logged_in=%q should yield loggedIn=false", v)
 			}
@@ -93,20 +92,10 @@ func TestGroupCandidates(t *testing.T) {
 		}
 	})
 
-	t.Run("most-recent user_session per store kept; zero-creation safe", func(t *testing.T) {
-		newer := time.Unix(1000, 0)
-		raw := []rawCookie{us("A", "old", time.Time{}), us("A", "new", newer)}
-		got := groupCandidates(raw)
-		if len(got) != 1 || got[0].cookie.Value != "new" {
-			t.Fatalf("want single candidate with newest value 'new', got %+v", got)
-		}
-	})
-
-	t.Run("equal creation within a store: last-seen wins", func(t *testing.T) {
-		eq := time.Unix(500, 0)
-		got := groupCandidates([]rawCookie{us("A", "first", eq), us("A", "second", eq)})
+	t.Run("multiple user_session in one store: last-seen wins", func(t *testing.T) {
+		got := groupCandidates([]rawCookie{us("A", "first"), us("A", "second")})
 		if len(got) != 1 || got[0].cookie.Value != "second" {
-			t.Fatalf("want last-seen 'second', got %+v", got)
+			t.Fatalf("want single candidate with last-seen value 'second', got %+v", got)
 		}
 	})
 
@@ -139,8 +128,8 @@ func recordingValidator(dead ...string) (func(*http.Cookie) error, *[]string) {
 	}, &calls
 }
 
-func cand(store, value string, loggedIn bool, creation time.Time) sessionCandidate {
-	return sessionCandidate{cookie: NewSessionCookie(value), store: store, loggedIn: loggedIn, creation: creation}
+func cand(store, value string, loggedIn bool) sessionCandidate {
+	return sessionCandidate{cookie: NewSessionCookie(value), store: store, loggedIn: loggedIn}
 }
 
 func TestSelectSession(t *testing.T) {
@@ -152,7 +141,7 @@ func TestSelectSession(t *testing.T) {
 
 	t.Run("single candidate skips validation entirely", func(t *testing.T) {
 		validate, calls := recordingValidator()
-		got, err := selectSession([]sessionCandidate{cand("A", "only", true, time.Time{})}, validate)
+		got, err := selectSession([]sessionCandidate{cand("A", "only", true)}, validate)
 		if err != nil || got.Value != "only" {
 			t.Fatalf("got (%v, %v), want only/nil", got, err)
 		}
@@ -161,59 +150,53 @@ func TestSelectSession(t *testing.T) {
 		}
 	})
 
-	t.Run("nil validator returns most-recent without calls", func(t *testing.T) {
-		older, newer := time.Unix(1, 0), time.Unix(2, 0)
-		got, _ := selectSession([]sessionCandidate{cand("A", "old", true, older), cand("B", "new", true, newer)}, nil)
-		if got.Value != "new" {
-			t.Errorf("got %q, want most-recent 'new'", got.Value)
+	t.Run("nil validator returns first by store key without calls", func(t *testing.T) {
+		got, _ := selectSession([]sessionCandidate{cand("B", "b", true), cand("A", "a", true)}, nil)
+		if got.Value != "a" {
+			t.Errorf("got %q, want first-by-store-key 'a'", got.Value)
 		}
 	})
 
-	t.Run("most-recent valid wins and short-circuits", func(t *testing.T) {
-		older, newer := time.Unix(1, 0), time.Unix(2, 0)
+	t.Run("first valid by store key wins and short-circuits", func(t *testing.T) {
 		validate, calls := recordingValidator()
-		got, _ := selectSession([]sessionCandidate{cand("A", "old", true, older), cand("B", "new", true, newer)}, validate)
-		if got.Value != "new" {
-			t.Errorf("got %q, want 'new'", got.Value)
+		got, _ := selectSession([]sessionCandidate{cand("B", "b", true), cand("A", "a", true)}, validate)
+		if got.Value != "a" {
+			t.Errorf("got %q, want 'a'", got.Value)
 		}
-		if len(*calls) != 1 || (*calls)[0] != "new" {
-			t.Errorf("expected to validate only 'new' then stop; calls=%v", *calls)
+		if len(*calls) != 1 || (*calls)[0] != "a" {
+			t.Errorf("expected to validate only 'a' then stop; calls=%v", *calls)
 		}
 	})
 
-	t.Run("falls through to next when most-recent is dead", func(t *testing.T) {
-		older, newer := time.Unix(1, 0), time.Unix(2, 0)
-		validate, calls := recordingValidator("new") // newest is server-revoked
-		got, _ := selectSession([]sessionCandidate{cand("A", "old", true, older), cand("B", "new", true, newer)}, validate)
-		if got.Value != "old" {
-			t.Errorf("got %q, want the live 'old'", got.Value)
+	t.Run("falls through to next when the first is dead", func(t *testing.T) {
+		validate, calls := recordingValidator("a") // store A's session is server-revoked
+		got, _ := selectSession([]sessionCandidate{cand("A", "a", true), cand("B", "b", true)}, validate)
+		if got.Value != "b" {
+			t.Errorf("got %q, want the live 'b'", got.Value)
 		}
 		if len(*calls) != 2 {
 			t.Errorf("expected to validate both; calls=%v", *calls)
 		}
 	})
 
-	t.Run("all dead falls back to most-recent (picker not gate)", func(t *testing.T) {
-		older, newer := time.Unix(1, 0), time.Unix(2, 0)
-		validate, _ := recordingValidator("old", "new")
-		got, err := selectSession([]sessionCandidate{cand("A", "old", true, older), cand("B", "new", true, newer)}, validate)
-		if err != nil || got.Value != "new" {
-			t.Errorf("got (%q, %v), want most-recent 'new' and no error", got.Value, err)
+	t.Run("all dead falls back to first by store key (picker not gate)", func(t *testing.T) {
+		validate, _ := recordingValidator("a", "b")
+		got, err := selectSession([]sessionCandidate{cand("A", "a", true), cand("B", "b", true)}, validate)
+		if err != nil || got.Value != "a" {
+			t.Errorf("got (%q, %v), want first-by-store-key 'a' and no error", got.Value, err)
 		}
 	})
 
 	t.Run("no logged-in candidates falls back to the full set", func(t *testing.T) {
-		older, newer := time.Unix(1, 0), time.Unix(2, 0)
-		got, _ := selectSession([]sessionCandidate{cand("A", "old", false, older), cand("B", "new", false, newer)}, nil)
-		if got.Value != "new" {
-			t.Errorf("got %q, want 'new' from the full set", got.Value)
+		got, _ := selectSession([]sessionCandidate{cand("B", "b", false), cand("A", "a", false)}, nil)
+		if got.Value != "a" {
+			t.Errorf("got %q, want 'a' from the full set", got.Value)
 		}
 	})
 
-	t.Run("equal creation resolves deterministically by store key", func(t *testing.T) {
-		eq := time.Unix(5, 0)
-		forward := []sessionCandidate{cand("A", "a", true, eq), cand("B", "b", true, eq)}
-		reverse := []sessionCandidate{cand("B", "b", true, eq), cand("A", "a", true, eq)}
+	t.Run("pick is deterministic by store key regardless of input order", func(t *testing.T) {
+		forward := []sessionCandidate{cand("A", "a", true), cand("B", "b", true)}
+		reverse := []sessionCandidate{cand("B", "b", true), cand("A", "a", true)}
 		g1, _ := selectSession(forward, nil)
 		g2, _ := selectSession(reverse, nil)
 		if g1.Value != g2.Value || g1.Value != "a" {

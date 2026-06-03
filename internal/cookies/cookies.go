@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/browserutils/kooky"
 	_ "github.com/browserutils/kooky/browser/brave"
@@ -35,11 +34,10 @@ func NewSessionCookie(value string) *http.Cookie {
 // rawCookie is a github.com cookie reduced to the fields selection needs,
 // decoupled from kooky so the selection logic is unit-testable.
 type rawCookie struct {
-	store    string // FilePath()+"\x00"+Container — identifies one cookie store
-	domain   string
-	name     string
-	value    string
-	creation time.Time
+	store  string // FilePath()+"\x00"+Container — identifies one cookie store
+	domain string
+	name   string
+	value  string
 }
 
 // sessionCandidate is a user_session cookie plus whether its store is logged in.
@@ -47,7 +45,6 @@ type sessionCandidate struct {
 	cookie   *http.Cookie
 	store    string
 	loggedIn bool // a logged_in=yes cookie exists in the SAME store
-	creation time.Time
 }
 
 // readRawCookies reads every valid github.com cookie across all supported
@@ -71,11 +68,10 @@ func readRawCookies() ([]rawCookie, error) {
 			store = c.Browser.FilePath() + "\x00" + c.Container
 		}
 		out = append(out, rawCookie{
-			store:    store,
-			domain:   c.Domain,
-			name:     c.Name,
-			value:    c.Value,
-			creation: c.Creation,
+			store:  store,
+			domain: c.Domain,
+			name:   c.Name,
+			value:  c.Value,
 		})
 	}
 	return out, err
@@ -105,11 +101,11 @@ func groupCandidates(raw []rawCookie) []sessionCandidate {
 		}
 		switch c.name {
 		case "user_session":
-			// Most-recent within a store; on a tie, last-seen wins. Intra-store
-			// ties are effectively impossible (distinct rowids / real timestamps).
-			if s.session == nil || !c.creation.Before(s.session.creation) {
-				s.session = c
-			}
+			// A store essentially never holds two user_session cookies; if it
+			// does, last-seen wins. There's no reliable recency signal to prefer
+			// one (kooky derives Creation from the SQLite rowid on Chromium), and
+			// the final pick across stores is made deterministic in selectSession.
+			s.session = c
 		case "logged_in":
 			if c.value == "yes" {
 				s.loggedIn = true
@@ -126,7 +122,6 @@ func groupCandidates(raw []rawCookie) []sessionCandidate {
 			cookie:   NewSessionCookie(s.session.value),
 			store:    key,
 			loggedIn: s.loggedIn,
-			creation: s.session.creation,
 		})
 	}
 	return out
@@ -149,8 +144,8 @@ func filterLoggedIn(cands []sessionCandidate) []sessionCandidate {
 // remaining tie by validating against GitHub — but only when more than one
 // candidate survives, since a lone candidate is the only choice anyway. It is a
 // picker, not a gate: if validation is inconclusive (all fail, or the network
-// is down) it returns the most-recent candidate and lets the caller surface the
-// authoritative error.
+// is down) it returns the first candidate (by store key) and lets the caller
+// surface the authoritative error.
 func selectSession(cands []sessionCandidate, validate func(*http.Cookie) error) (*http.Cookie, error) {
 	if len(cands) == 0 {
 		return nil, fmt.Errorf("no github.com user_session cookie found in any supported browser — are you logged into GitHub?")
@@ -162,13 +157,11 @@ func selectSession(cands []sessionCandidate, validate func(*http.Cookie) error) 
 	if len(pool) == 0 {
 		pool = append([]sessionCandidate(nil), cands...)
 	}
-	// Creation is a weak signal (rowid-derived, not wall-clock, on Chromium), so
-	// it only orders our attempts; the store key gives a deterministic tiebreak
-	// despite kooky's nondeterministic discovery order.
-	sort.SliceStable(pool, func(i, j int) bool {
-		if !pool[i].creation.Equal(pool[j].creation) {
-			return pool[i].creation.After(pool[j].creation)
-		}
+	// Order by store key for a stable pick across runs (kooky's discovery order
+	// is nondeterministic). There is no trustworthy recency signal to prefer one
+	// store over another, so this order is arbitrary-but-deterministic; when it
+	// matters (2+ live candidates) validation, not ordering, makes the choice.
+	sort.Slice(pool, func(i, j int) bool {
 		return pool[i].store < pool[j].store
 	})
 
