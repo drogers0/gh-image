@@ -11,6 +11,27 @@ import (
 
 var uploadTokenRe = regexp.MustCompile(`"uploadToken":"([^"]+)"`)
 
+// isSAMLProtected reports whether the repo page is a SAML SSO "Sign in to
+// <owner>" interstitial rather than the real repo page. When an organization
+// enforces SAML SSO and the browser session is authenticated but not
+// SSO-authorized for that org, GitHub serves this interstitial with HTTP 200 —
+// so the uploadToken is absent even though the user has write access.
+//
+// The SSO authorization is server-side state (it lasts ~24h and is granted only
+// by completing the identity-provider handshake in a browser), so it is NOT a
+// cookie that can be copied; the fix is to re-authorize at /orgs/<owner>/sso.
+//
+// We require signals SPECIFIC to the interstitial and scoped to THIS owner. We
+// deliberately do NOT match the words "SAML"/"single sign-on" anywhere on the
+// page: those appear in GitHub's site chrome/help links on virtually every page
+// (and in any repo that is simply about SAML), which would be a false positive.
+func isSAMLProtected(body []byte, owner string) bool {
+	o := regexp.QuoteMeta(owner)
+	orgSSOLink := regexp.MustCompile(`/orgs/` + o + `/sso`).Match(body)
+	ssoTitle := regexp.MustCompile(`(?i)<title>\s*Sign in to ` + o + `\b`).Match(body)
+	return orgSSOLink || ssoTitle
+}
+
 // GetUploadToken fetches the repo page and extracts the uploadToken
 // from the JS payload. Requires authenticated cookies in the client.
 func GetUploadToken(client *http.Client, owner, repo string) (string, error) {
@@ -39,7 +60,17 @@ func GetUploadToken(client *http.Client, owner, repo string) (string, error) {
 
 	match := uploadTokenRe.FindSubmatch(body)
 	if match == nil {
-		return "", fmt.Errorf("uploadToken not found on repo page — do you have write access to %s/%s?", owner, repo)
+		// Distinguish the common SAML-SSO case from a genuine lack of access, so
+		// the user isn't wrongly told to check their permissions.
+		if isSAMLProtected(body, owner) {
+			return "", fmt.Errorf("%s enforces SAML SSO and your session is not authorized for it — "+
+				"authorize in a browser at https://github.com/orgs/%s/sso (lasts ~24h), then retry. "+
+				"This is NOT a write-access problem, and copying additional cookies cannot fix it "+
+				"(the SSO grant is server-side)", owner, owner)
+		}
+		return "", fmt.Errorf("uploadToken not found on repo page — do you have write access to %s/%s? "+
+			"(if %s enforces SAML SSO, authorize your session at https://github.com/orgs/%s/sso and retry)",
+			owner, repo, owner, owner)
 	}
 
 	return string(match[1]), nil
