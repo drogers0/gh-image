@@ -3,22 +3,9 @@ package upload
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
-
-// serve returns an httptest server that responds with status/body, and a client
-// pointed at it. GetUploadToken builds a github.com URL internally, so these
-// tests exercise isSAMLProtected / the error wording directly where the URL is
-// fixed, and use the server only for the HTTP-shape tests below.
-func serve(status int, body string) (*httptest.Server, *http.Client) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
-	}))
-	return srv, srv.Client()
-}
 
 func TestIsSAMLProtected(t *testing.T) {
 	cases := []struct {
@@ -40,7 +27,7 @@ func TestIsSAMLProtected(t *testing.T) {
 			want:  true,
 		},
 		{
-			// The key false positive the naive "contains SAML" check would hit:
+			// The key false positive a naive "contains SAML" check would hit:
 			// site chrome / help links mention SSO on essentially every page.
 			name:  "normal repo page with SSO words in chrome must NOT match",
 			owner: "GymPod",
@@ -75,57 +62,70 @@ func TestIsSAMLProtected(t *testing.T) {
 	}
 }
 
-func TestGetUploadToken_Success(t *testing.T) {
-	srv, client := serve(http.StatusOK, `window.foo={"uploadToken":"TKN123"};`)
-	defer srv.Close()
-
-	// GetUploadToken hardcodes the github.com URL, so we can't redirect it at the
-	// server here; instead verify extraction via the regex contract the function
-	// relies on. (The SSO/error wording is covered by the table tests above.)
-	match := uploadTokenRe.FindSubmatch([]byte(`{"uploadToken":"TKN123"}`))
-	if match == nil || string(match[1]) != "TKN123" {
-		t.Fatalf("uploadTokenRe failed to extract token")
+func TestGetUploadToken(t *testing.T) {
+	cases := []struct {
+		name        string
+		owner       string
+		body        string
+		wantToken   string   // non-empty => expect success
+		errContains []string // substrings the error must include
+		errExcludes []string // substrings the error must NOT include
+	}{
+		{
+			name:      "success extracts the token",
+			owner:     "octocat",
+			body:      `window.x={"uploadToken":"TKN123"};`,
+			wantToken: "TKN123",
+		},
+		{
+			name:        "SAML interstitial gives an actionable SSO error, not write-access",
+			owner:       "GymPod",
+			body:        `<title>Sign in to GymPod</title><a href="/orgs/GymPod/sso">Single sign-on</a>`,
+			errContains: []string{"SAML SSO", "/orgs/GymPod/sso", "NOT a write-access problem"},
+			errExcludes: []string{"do you have write access to GymPod"},
+		},
+		{
+			name:        "no token and no SSO markers gives the generic message",
+			owner:       "octocat",
+			body:        `<html>just a page, no token</html>`,
+			errContains: []string{"do you have write access to octocat/hello"},
+		},
 	}
-	_ = client
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: stubTransport(http.StatusOK, tc.body)}
+			tok, err := GetUploadToken(client, tc.owner, "hello")
+
+			if tc.wantToken != "" {
+				if err != nil {
+					t.Fatalf("expected success, got error: %v", err)
+				}
+				if tok != tc.wantToken {
+					t.Errorf("token = %q, want %q", tok, tc.wantToken)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			for _, s := range tc.errContains {
+				if !strings.Contains(err.Error(), s) {
+					t.Errorf("error missing %q; got: %s", s, err.Error())
+				}
+			}
+			for _, s := range tc.errExcludes {
+				if strings.Contains(err.Error(), s) {
+					t.Errorf("error should not contain %q; got: %s", s, err.Error())
+				}
+			}
+		})
+	}
 }
 
-func TestGetUploadToken_SAMLErrorWording(t *testing.T) {
-	// Drive GetUploadToken through a stubbed transport so we control the body it
-	// reads from "github.com" without a real network call.
-	client := &http.Client{Transport: stubTransport(http.StatusOK,
-		`<title>Sign in to GymPod</title><a href="/orgs/GymPod/sso">Single sign-on</a>`)}
-
-	_, err := GetUploadToken(client, "GymPod", "realtime-core")
-	if err == nil {
-		t.Fatal("expected an error for the SSO interstitial")
-	}
-	msg := err.Error()
-	for _, want := range []string{"SAML SSO", "/orgs/GymPod/sso", "NOT a write-access problem"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("error message missing %q; got: %s", want, msg)
-		}
-	}
-	if strings.Contains(msg, "do you have write access") {
-		t.Errorf("SSO error should not use the misleading write-access wording; got: %s", msg)
-	}
-}
-
-func TestGetUploadToken_GenericErrorWording(t *testing.T) {
-	// No token and no SSO markers → the generic message (with an SSO hint).
-	client := &http.Client{Transport: stubTransport(http.StatusOK, `<html>just a page, no token</html>`)}
-
-	_, err := GetUploadToken(client, "octocat", "hello")
-	if err == nil {
-		t.Fatal("expected an error when uploadToken is absent")
-	}
-	if !strings.Contains(err.Error(), "do you have write access to octocat/hello") {
-		t.Errorf("expected the generic write-access message; got: %s", err.Error())
-	}
-}
-
-// stubTransport returns an http.RoundTripper that answers every request with the
-// given status and body, so GetUploadToken's hardcoded github.com URL is served
-// locally.
+// stubTransport answers every request with the given status and body, so
+// GetUploadToken's hardcoded github.com URL is served locally without a network
+// call.
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
