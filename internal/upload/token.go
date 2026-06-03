@@ -26,8 +26,13 @@ var uploadTokenRe = regexp.MustCompile(`"uploadToken":"([^"]+)"`)
 // page: those appear in GitHub's site chrome/help links on virtually every page
 // (and in any repo that is simply about SAML), which would be a false positive.
 func isSAMLProtected(body []byte, owner string) bool {
+	if owner == "" {
+		return false
+	}
+	// Owners are case-insensitive on GitHub, and the page may render a different
+	// case than the user typed, so both checks are case-insensitive.
 	o := regexp.QuoteMeta(owner)
-	orgSSOLink := regexp.MustCompile(`/orgs/` + o + `/sso`).Match(body)
+	orgSSOLink := regexp.MustCompile(`(?i)/orgs/` + o + `/sso`).Match(body)
 	ssoTitle := regexp.MustCompile(`(?i)<title>\s*Sign in to ` + o + `\b`).Match(body)
 	return orgSSOLink || ssoTitle
 }

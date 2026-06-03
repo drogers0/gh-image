@@ -52,6 +52,28 @@ func TestIsSAMLProtected(t *testing.T) {
 			body:  `<title>Sign in to axb</title>`, // '.' must NOT act as a wildcard
 			want:  false,
 		},
+		{
+			// GitHub owners are case-insensitive and the page may render a
+			// different case than the user typed; the link must still match.
+			name:  "lowercase owner matches a canonical-case sso link",
+			owner: "gympod",
+			body:  `<a href="/orgs/GymPod/sso">Single sign-on</a>`,
+			want:  true,
+		},
+		{
+			// Substring of another org's name must not match.
+			name:  "owner that is a substring of another org must NOT match",
+			owner: "pod",
+			body:  `<a href="/orgs/GymPod/sso">x</a>`,
+			want:  false,
+		},
+		{
+			// Defensive: an empty owner must never match (and must not panic).
+			name:  "empty owner never matches",
+			owner: "",
+			body:  `<a href="/orgs/Anything/sso"><title>Sign in to </title>`,
+			want:  false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
