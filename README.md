@@ -12,6 +12,7 @@
   <a href="https://github.com/drogers0/gh-image/releases"><img src="https://img.shields.io/github/downloads/drogers0/gh-image/total?color=green" alt="Total downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/drogers0/gh-image?color=lightgrey" alt="License: MIT"></a>
   <a href="https://goreportcard.com/report/github.com/drogers0/gh-image"><img src="https://goreportcard.com/badge/github.com/drogers0/gh-image" alt="Go Report Card"></a>
+  <a href="https://skills.sh/drogers0/gh-image"><img src="https://skills.sh/b/drogers0/gh-image" alt="skills.sh"></a>
 </p>
 
 ---
@@ -30,6 +31,8 @@ gh extension install drogers0/gh-image
 ```
 
 That's it. The [`gh` CLI](https://cli.github.com) auto-detects your platform and downloads the prebuilt binary. Pre-built releases ship for **macOS** (arm64, amd64), **Linux** (amd64, arm64), and **Windows** (amd64).
+
+> **Using an AI agent?** `gh-image` is also packaged as an [agent skill](https://agentskills.io): `npx skills add drogers0/gh-image` makes it available to Claude Code, Codex, and other skills-compatible agents.
 
 <details>
 <summary>Build from source</summary>
