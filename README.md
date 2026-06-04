@@ -32,7 +32,7 @@ gh extension install drogers0/gh-image
 
 That's it. The [`gh` CLI](https://cli.github.com) auto-detects your platform and downloads the prebuilt binary. Pre-built releases ship for **macOS** (arm64, amd64), **Linux** (amd64, arm64), and **Windows** (amd64).
 
-> **Using an AI agent?** `gh-image` is also packaged as an [agent skill](https://agentskills.io): `npx skills add drogers0/gh-image` makes it available to Claude Code, Codex, and other skills-compatible agents.
+> **Using an AI agent?** `gh-image` is also packaged as an [agent skill](https://agentskills.io). Run `npx skills add drogers0/gh-image` to make it available to your agent — the [Agent Skills standard](https://agentskills.io/clients) is supported by **Claude Code**, **OpenAI Codex**, **Cursor**, **GitHub Copilot**, and many others — so you can just ask it to "attach this screenshot to the PR."
 
 <details>
 <summary>Build from source</summary>
