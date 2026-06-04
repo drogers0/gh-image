@@ -32,8 +32,6 @@ gh extension install drogers0/gh-image
 
 That's it. The [`gh` CLI](https://cli.github.com) auto-detects your platform and downloads the prebuilt binary. Pre-built releases ship for **macOS** (arm64, amd64), **Linux** (amd64, arm64), and **Windows** (amd64).
 
-> **Using an AI agent?** `gh-image` is also packaged as an [agent skill](https://agentskills.io). Run `npx skills add drogers0/gh-image` to make it available to your agent — the [Agent Skills standard](https://agentskills.io/clients) is supported by **Claude Code**, **OpenAI Codex**, **Cursor**, **GitHub Copilot**, and many others — so you can just ask it to "attach this screenshot to the PR."
-
 <details>
 <summary>Build from source</summary>
 
@@ -83,6 +81,16 @@ $(gh image bug.png)
 
 Happens consistently after the third click."
 ```
+
+## Use with AI agents
+
+`gh-image` is packaged as an [agent skill](https://agentskills.io), so AI coding agents can upload and embed images for you — just ask in natural language, e.g. *"attach this screenshot to the PR"* or *"file an issue and add this image."*
+
+```bash
+npx skills add drogers0/gh-image
+```
+
+The open [Agent Skills standard](https://agentskills.io/clients) is supported by **Claude Code**, **OpenAI Codex**, **Cursor**, **GitHub Copilot**, and [many more](https://agentskills.io/clients). The skill walks the agent through installing this extension (if needed), running the upload, and embedding the resulting `user-attachments` URL into a PR, issue, or comment.
 
 ## Authentication
 
