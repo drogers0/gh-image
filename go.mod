@@ -2,11 +2,11 @@ module github.com/drogers0/gh-image
 
 go 1.26.1
 
-require github.com/browserutils/kooky v0.2.9
+require github.com/browserutils/kooky v0.2.10
 
 require (
 	github.com/browserutils/ese v0.0.0-20260314233042-37b6a03a93ce // indirect
-	github.com/go-sqlite/sqlite3 v0.0.0-20180313105335-53dd8e640ee7 // indirect
+	github.com/browserutils/sqlite3 v0.0.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/gonuts/binary v0.2.0 // indirect
 	github.com/keybase/go-keychain v0.0.1 // indirect
