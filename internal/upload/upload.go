@@ -38,19 +38,30 @@ type policyResponse struct {
 	AssetUploadAuthenticityToken string            `json:"asset_upload_authenticity_token"`
 }
 
-// NewClient creates an http.Client with the GitHub session cookies set.
+// Client carries the HTTP client (with GitHub session cookies) and the base URL
+// for GitHub requests. baseURL has no trailing slash; the production value is
+// "https://github.com". Tests point it at an httptest server.
+type Client struct {
+	http    *http.Client
+	baseURL string
+}
+
+// NewClient creates a Client with the GitHub session cookies set.
 // GitHub requires both user_session and __Host-user_session_same_site
 // for CSRF validation on the upload endpoint.
-func NewClient(sessionCookie *http.Cookie) *http.Client {
-	return &http.Client{
-		Jar:     cookies.NewGitHubCookieJar(sessionCookie),
-		Timeout: 30 * time.Second,
+func NewClient(sessionCookie *http.Cookie) *Client {
+	return &Client{
+		http: &http.Client{
+			Jar:     cookies.NewGitHubCookieJar(sessionCookie),
+			Timeout: 30 * time.Second,
+		},
+		baseURL: "https://github.com",
 	}
 }
 
 // Upload uploads an image file to GitHub and returns the asset URL.
 // owner/repo identifies the target repository, repoID is its numeric ID.
-func Upload(client *http.Client, owner, repo string, repoID int, imagePath string) (*Result, error) {
+func (c *Client) Upload(owner, repo string, repoID int, imagePath string) (*Result, error) {
 	info, err := os.Stat(imagePath)
 	if err != nil {
 		return nil, fmt.Errorf("image file: %w", err)
@@ -59,13 +70,13 @@ func Upload(client *http.Client, owner, repo string, repoID int, imagePath strin
 	fileName := filepath.Base(imagePath)
 
 	// Step 0: Get uploadToken from repo page
-	uploadToken, err := GetUploadToken(client, owner, repo)
+	uploadToken, err := c.getUploadToken(owner, repo)
 	if err != nil {
 		return nil, fmt.Errorf("step 0 (get upload token): %w", err)
 	}
 
 	// Step 1: Request upload policy
-	policy, err := requestPolicy(client, owner, repo, uploadToken, repoID, fileName, info.Size(), contentType)
+	policy, err := c.requestPolicy(owner, repo, uploadToken, repoID, fileName, info.Size(), contentType)
 	if err != nil {
 		return nil, fmt.Errorf("step 1 (request policy): %w", err)
 	}
@@ -77,7 +88,7 @@ func Upload(client *http.Client, owner, repo string, repoID int, imagePath strin
 	}
 
 	// Step 3: Finalize the upload
-	result, err := finalizeUpload(client, owner, repo, policy)
+	result, err := c.finalizeUpload(owner, repo, policy)
 	if err != nil {
 		return nil, fmt.Errorf("step 3 (finalize): %w", err)
 	}
@@ -86,7 +97,7 @@ func Upload(client *http.Client, owner, repo string, repoID int, imagePath strin
 }
 
 // requestPolicy calls POST /upload/policies/assets to get the S3 presigned form.
-func requestPolicy(client *http.Client, owner, repo, uploadToken string, repoID int, fileName string, fileSize int64, contentType string) (*policyResponse, error) {
+func (c *Client) requestPolicy(owner, repo, uploadToken string, repoID int, fileName string, fileSize int64, contentType string) (*policyResponse, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
@@ -103,18 +114,18 @@ func requestPolicy(client *http.Client, owner, repo, uploadToken string, repoID 
 	}
 	writer.Close()
 
-	req, err := http.NewRequest("POST", "https://github.com/upload/policies/assets", body)
+	req, err := http.NewRequest("POST", c.baseURL+"/upload/policies/assets", body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Origin", "https://github.com")
-	req.Header.Set("Referer", fmt.Sprintf("https://github.com/%s/%s", owner, repo))
+	req.Header.Set("Origin", c.baseURL)
+	req.Header.Set("Referer", fmt.Sprintf("%s/%s/%s", c.baseURL, owner, repo))
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("User-Agent", httputil.UserAgent)
 
-	resp, err := client.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +158,7 @@ func requestPolicy(client *http.Client, owner, repo, uploadToken string, repoID 
 }
 
 // finalizeUpload calls PUT /upload/assets/{id} to mark the asset as ready.
-func finalizeUpload(client *http.Client, owner, repo string, policy *policyResponse) (*Result, error) {
+func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse) (*Result, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	if err := writer.WriteField("authenticity_token", policy.AssetUploadAuthenticityToken); err != nil {
@@ -155,18 +166,18 @@ func finalizeUpload(client *http.Client, owner, repo string, policy *policyRespo
 	}
 	writer.Close()
 
-	req, err := http.NewRequest("PUT", fmt.Sprintf("https://github.com/upload/assets/%d", policy.Asset.ID), body)
+	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/upload/assets/%d", c.baseURL, policy.Asset.ID), body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Origin", "https://github.com")
-	req.Header.Set("Referer", fmt.Sprintf("https://github.com/%s/%s", owner, repo))
+	req.Header.Set("Origin", c.baseURL)
+	req.Header.Set("Referer", fmt.Sprintf("%s/%s/%s", c.baseURL, owner, repo))
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("User-Agent", httputil.UserAgent)
 
-	resp, err := client.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}

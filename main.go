@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -23,6 +24,50 @@ const usage = `Usage:
 var version = "dev"
 
 func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, productionDeps()))
+}
+
+// uploadFunc uploads one image and returns its markdown reference.
+type uploadFunc func(info *repo.Info, imagePath string) (string, error)
+
+// deps are the I/O boundaries run() depends on; productionDeps wires the real ones,
+// tests inject stubs so the orchestration spine runs without network/subprocess/exit.
+type deps struct {
+	resolveRepo   func(owner, name string) (*repo.Info, error)
+	resolveCookie func(tokenFlag string) (*http.Cookie, string, error)
+	// newUploader builds an uploader from a session cookie. It is called once per
+	// run so the underlying HTTP client (and its cookie jar) is shared across all
+	// images, matching the single-client behavior of the original implementation.
+	newUploader  func(cookie *http.Cookie) uploadFunc
+	extractToken func() (string, error)
+	checkToken   func(tokenFlag string) (username, source string, err error)
+}
+
+func productionDeps() deps {
+	return deps{
+		resolveRepo:   repo.Resolve,
+		resolveCookie: resolveSessionCookie,
+		newUploader: func(cookie *http.Cookie) uploadFunc {
+			client := upload.NewClient(cookie)
+			return func(info *repo.Info, imagePath string) (string, error) {
+				res, err := client.Upload(info.Owner, info.Name, info.ID, imagePath)
+				if err != nil {
+					return "", err
+				}
+				return res.Markdown, nil
+			}
+		},
+		// extract-token stays offline: pass nil so selection skips network validation.
+		extractToken: func() (string, error) {
+			return extractToken(func() (*http.Cookie, error) { return cookies.GetGitHubSession(nil) })
+		},
+		checkToken: func(tokenFlag string) (string, string, error) {
+			return checkToken(tokenFlag, resolveSessionCookie, session.CheckValidity)
+		},
+	}
+}
+
+func run(args []string, stdout, stderr io.Writer, d deps) int {
 	var repoFlag string
 	var repoSet bool
 	var tokenFlag string
@@ -31,7 +76,6 @@ func main() {
 	var firstPosAfterDoubleDash bool
 
 	// Manual arg parsing so flags can appear anywhere (before or after positional args).
-	args := os.Args[1:]
 	flagsDone := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -50,82 +94,82 @@ func main() {
 			flagsDone = true
 		case arg == "--repo":
 			if repoSet {
-				fmt.Fprintf(os.Stderr, "Error: --repo specified more than once\n")
-				os.Exit(1)
+				fmt.Fprintf(stderr, "Error: --repo specified more than once\n")
+				return 1
 			}
 			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "Error: --repo requires a value (owner/repo)\n%s\n", usage)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "Error: --repo requires a value (owner/repo)\n%s\n", usage)
+				return 1
 			}
 			i++
 			repoFlag = args[i]
 			repoSet = true
 		case strings.HasPrefix(arg, "--repo="):
 			if repoSet {
-				fmt.Fprintf(os.Stderr, "Error: --repo specified more than once\n")
-				os.Exit(1)
+				fmt.Fprintf(stderr, "Error: --repo specified more than once\n")
+				return 1
 			}
 			repoFlag = strings.SplitN(arg, "=", 2)[1]
 			repoSet = true
 		case arg == "--token":
 			if tokenSet {
-				fmt.Fprintf(os.Stderr, "Error: --token specified more than once\n")
-				os.Exit(1)
+				fmt.Fprintf(stderr, "Error: --token specified more than once\n")
+				return 1
 			}
 			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "Error: --token requires a value\n%s\n", usage)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "Error: --token requires a value\n%s\n", usage)
+				return 1
 			}
 			i++
 			tokenFlag = strings.TrimSpace(args[i])
 			if tokenFlag == "" {
-				fmt.Fprintf(os.Stderr, "Error: --token value cannot be empty\n%s\n", usage)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "Error: --token value cannot be empty\n%s\n", usage)
+				return 1
 			}
 			tokenSet = true
 		case strings.HasPrefix(arg, "--token="):
 			if tokenSet {
-				fmt.Fprintf(os.Stderr, "Error: --token specified more than once\n")
-				os.Exit(1)
+				fmt.Fprintf(stderr, "Error: --token specified more than once\n")
+				return 1
 			}
 			tokenFlag = strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
 			if tokenFlag == "" {
-				fmt.Fprintf(os.Stderr, "Error: --token value cannot be empty\n%s\n", usage)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "Error: --token value cannot be empty\n%s\n", usage)
+				return 1
 			}
 			tokenSet = true
 		case arg == "--version":
-			fmt.Printf("gh-image %s\n", version)
-			os.Exit(0)
+			fmt.Fprintf(stdout, "gh-image %s\n", version)
+			return 0
 		case arg == "--help" || arg == "-h":
-			fmt.Printf("%s\n\n", usage)
-			fmt.Println("Upload images to GitHub and print markdown references.")
-			fmt.Println()
-			fmt.Println("The --repo flag is optional. If omitted, the repository is")
-			fmt.Println("inferred from the git remote in the current directory.")
-			fmt.Println()
-			fmt.Println("Flags:")
-			fmt.Println("  --repo owner/repo   GitHub repository (optional)")
-			fmt.Println("  --token <value>     GitHub session token (default: extracted from browser)")
-			fmt.Println("                      Can also be set via GH_SESSION_TOKEN environment variable")
-			fmt.Println("                      WARNING: --token values are visible in process listings.")
-			fmt.Println("                      Prefer GH_SESSION_TOKEN on shared machines.")
-			fmt.Println("  --version           Print version and exit")
-			fmt.Println()
-			fmt.Println("Subcommands:")
-			fmt.Println("  extract-token       Extract session token from browser and print to stdout")
-			fmt.Println("  check-token         Verify a session token is valid and print username to stdout")
-			fmt.Println()
-			fmt.Println("Use -- to separate flags from filenames starting with a dash:")
-			fmt.Println("  gh image -- -screenshot.png")
-			os.Exit(0)
+			fmt.Fprintf(stdout, "%s\n\n", usage)
+			fmt.Fprintln(stdout, "Upload images to GitHub and print markdown references.")
+			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout, "The --repo flag is optional. If omitted, the repository is")
+			fmt.Fprintln(stdout, "inferred from the git remote in the current directory.")
+			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout, "Flags:")
+			fmt.Fprintln(stdout, "  --repo owner/repo   GitHub repository (optional)")
+			fmt.Fprintln(stdout, "  --token <value>     GitHub session token (default: extracted from browser)")
+			fmt.Fprintln(stdout, "                      Can also be set via GH_SESSION_TOKEN environment variable")
+			fmt.Fprintln(stdout, "                      WARNING: --token values are visible in process listings.")
+			fmt.Fprintln(stdout, "                      Prefer GH_SESSION_TOKEN on shared machines.")
+			fmt.Fprintln(stdout, "  --version           Print version and exit")
+			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout, "Subcommands:")
+			fmt.Fprintln(stdout, "  extract-token       Extract session token from browser and print to stdout")
+			fmt.Fprintln(stdout, "  check-token         Verify a session token is valid and print username to stdout")
+			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout, "Use -- to separate flags from filenames starting with a dash:")
+			fmt.Fprintln(stdout, "  gh image -- -screenshot.png")
+			return 0
 		case strings.HasPrefix(arg, "-") && arg != "-":
-			fmt.Fprintf(os.Stderr, "Error: unknown flag %s\n", arg)
+			fmt.Fprintf(stderr, "Error: unknown flag %s\n", arg)
 			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
-				fmt.Fprintf(os.Stderr, "If this is a filename, use: gh image -- %s\n", arg)
+				fmt.Fprintf(stderr, "If this is a filename, use: gh image -- %s\n", arg)
 			}
-			fmt.Fprintf(os.Stderr, "Run 'gh image --help' for usage.\n")
-			os.Exit(1)
+			fmt.Fprintf(stderr, "Run 'gh image --help' for usage.\n")
+			return 1
 		default:
 			imagePaths = append(imagePaths, arg)
 		}
@@ -134,32 +178,46 @@ func main() {
 	// Dispatch subcommands before any other validation.
 	subcommand, dispatchErr := classifySubcommand(imagePaths, firstPosAfterDoubleDash, tokenFlag, repoSet)
 	if dispatchErr != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", dispatchErr)
+		fmt.Fprintf(stderr, "Error: %v\n", dispatchErr)
 		var ue *usageError
 		if errors.As(dispatchErr, &ue) {
-			fmt.Fprintf(os.Stderr, "%s\nRun 'gh image --help' for usage.\n", usage)
+			fmt.Fprintf(stderr, "%s\nRun 'gh image --help' for usage.\n", usage)
 		}
-		os.Exit(1)
+		return 1
 	}
 	switch subcommand {
 	case "extract-token":
-		handleExtractToken()
-		return
+		value, err := d.extractToken()
+		if err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stderr, "Extracted session token from browser cookies")
+		fmt.Fprintln(stdout, value)
+		return 0
 	case "check-token":
-		handleCheckToken(tokenFlag)
-		return
+		username, source, err := d.checkToken(tokenFlag)
+		if err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "Token is valid (source: %s)\n", source)
+		if username != "" {
+			fmt.Fprintln(stdout, username)
+		}
+		return 0
 	}
 
 	if len(imagePaths) == 0 {
-		fmt.Fprintf(os.Stderr, "%s\nRun 'gh image --help' for usage.\n", usage)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "%s\nRun 'gh image --help' for usage.\n", usage)
+		return 1
 	}
 
 	// Validate image paths early
 	for _, p := range imagePaths {
 		if p == "" {
-			fmt.Fprintf(os.Stderr, "Error: empty image path\n")
-			os.Exit(1)
+			fmt.Fprintf(stderr, "Error: empty image path\n")
+			return 1
 		}
 	}
 
@@ -167,46 +225,48 @@ func main() {
 	var owner, name string
 	if repoSet {
 		if repoFlag == "" {
-			fmt.Fprintf(os.Stderr, "Error: --repo value cannot be empty\n")
-			os.Exit(1)
+			fmt.Fprintf(stderr, "Error: --repo value cannot be empty\n")
+			return 1
 		}
 		parts := strings.SplitN(repoFlag, "/", 2)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			fmt.Fprintf(os.Stderr, "Error: --repo must be in owner/repo format, got: %s\n", repoFlag)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "Error: --repo must be in owner/repo format, got: %s\n", repoFlag)
+			return 1
 		}
 		owner, name = parts[0], parts[1]
 	}
 
-	repoInfo, err := repo.Resolve(owner, name)
+	repoInfo, err := d.resolveRepo(owner, name)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error resolving repository: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "Error resolving repository: %v\n", err)
+		return 1
 	}
 
 	// Get session cookie (flag > env var > browser)
-	cookie, _, err := resolveSessionCookie(tokenFlag)
+	cookie, _, err := d.resolveCookie(tokenFlag)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
 	}
 
-	client := upload.NewClient(cookie)
+	// Build the uploader once so its HTTP client/cookie jar is shared across images.
+	uploadImage := d.newUploader(cookie)
 
 	// Upload each image, continuing on error
 	hasError := false
 	for _, imagePath := range imagePaths {
-		result, err := upload.Upload(client, repoInfo.Owner, repoInfo.Name, repoInfo.ID, imagePath)
+		markdown, err := uploadImage(repoInfo, imagePath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error uploading %s: %v\n", imagePath, err)
+			fmt.Fprintf(stderr, "Error uploading %s: %v\n", imagePath, err)
 			hasError = true
 			continue
 		}
-		fmt.Println(result.Markdown)
+		fmt.Fprintln(stdout, markdown)
 	}
 	if hasError {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 // usageError wraps an error to signal that usage text should be shown alongside the message.
@@ -305,19 +365,6 @@ func extractToken(getBrowserCookie func() (*http.Cookie, error)) (string, error)
 	return cookie.Value, nil
 }
 
-// handleExtractToken extracts the session cookie from the browser and prints
-// the raw token value to stdout. Source info is written to stderr.
-func handleExtractToken() {
-	// extract-token stays offline: pass nil so selection skips network validation.
-	value, err := extractToken(func() (*http.Cookie, error) { return cookies.GetGitHubSession(nil) })
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Fprintln(os.Stderr, "Extracted session token from browser cookies")
-	fmt.Println(value)
-}
-
 // checkToken resolves and validates a session token, returning the authenticated username and source.
 func checkToken(tokenFlag string, resolver func(string) (*http.Cookie, string, error), validator func(*http.Cookie) (string, error)) (string, string, error) {
 	cookie, source, err := resolver(tokenFlag)
@@ -329,18 +376,4 @@ func checkToken(tokenFlag string, resolver func(string) (*http.Cookie, string, e
 		return "", "", err
 	}
 	return username, source, nil
-}
-
-// handleCheckToken verifies the session cookie and prints the username to stdout.
-// Token source is resolved via resolveSessionCookie (flag > env var > browser).
-func handleCheckToken(tokenFlag string) {
-	username, source, err := checkToken(tokenFlag, resolveSessionCookie, session.CheckValidity)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Fprintf(os.Stderr, "Token is valid (source: %s)\n", source)
-	if username != "" {
-		fmt.Println(username)
-	}
 }

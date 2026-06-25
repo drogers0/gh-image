@@ -1,6 +1,7 @@
 package session
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -53,6 +54,29 @@ func TestCheckValidity_ValidNoUsername(t *testing.T) {
 	}
 	if username != "" {
 		t.Errorf("expected empty username, got %q", username)
+	}
+}
+
+// TestCheckValidity_EndToEnd exercises the exported CheckValidity (its client
+// construction + delegation) against a plain-HTTP server. Plain HTTP is correct:
+// CheckValidity builds its own http.Client with the default transport, which reaches
+// 127.0.0.1 without a self-signed cert. Kept serial — profileURL is process-global.
+func TestCheckValidity_EndToEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `<meta name="user-login" content="octo">`) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	old := profileURL
+	profileURL = srv.URL
+	defer func() { profileURL = old }()
+
+	got, err := CheckValidity(&http.Cookie{Name: "user_session", Value: "t"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "octo" {
+		t.Errorf("username = %q, want octo", got)
 	}
 }
 

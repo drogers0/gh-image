@@ -60,7 +60,13 @@ func readRawCookies() ([]rawCookie, error) {
 		kooky.Valid,
 		kooky.DomainHasSuffix("github.com"),
 	)
+	return mapKookyCookies(kcookies), err
+}
 
+// mapKookyCookies reduces kooky cookies to the fields selection needs. It is split
+// from readRawCookies so the (pure) store-key derivation is unit-testable without
+// touching real browser stores.
+func mapKookyCookies(kcookies []*kooky.Cookie) []rawCookie {
 	out := make([]rawCookie, 0, len(kcookies))
 	for _, c := range kcookies {
 		store := c.Container
@@ -74,7 +80,7 @@ func readRawCookies() ([]rawCookie, error) {
 			value:  c.Value,
 		})
 	}
-	return out, err
+	return out
 }
 
 // groupCandidates buckets raw cookies by store and produces one candidate per
@@ -177,19 +183,26 @@ func selectSession(cands []sessionCandidate, validate func(*http.Cookie) error) 
 	return pool[0].cookie, nil
 }
 
+// chooseSession turns a raw cookie read (and any read error) into the selected
+// session cookie. Splitting this from readRawCookies keeps the kooky browser read
+// the only part of the package that isn't unit-testable.
+func chooseSession(raw []rawCookie, readErr error, validate func(*http.Cookie) error) (*http.Cookie, error) {
+	cands := groupCandidates(raw)
+	if len(cands) == 0 {
+		// kooky reports errors for absent browsers/profiles alongside cookies
+		// from present ones; only surface the read error if nothing usable came back.
+		if readErr != nil {
+			return nil, fmt.Errorf("reading browser cookies: %w", readErr)
+		}
+		return nil, fmt.Errorf("no github.com user_session cookie found in any supported browser — are you logged into GitHub?")
+	}
+	return selectSession(cands, validate)
+}
+
 // GetGitHubSession returns the best github.com user_session cookie found across
 // supported browsers. When more than one logged-in candidate exists, validate
 // is used to pick a live one; pass nil to skip network validation.
 func GetGitHubSession(validate func(*http.Cookie) error) (*http.Cookie, error) {
 	raw, err := readRawCookies()
-	cands := groupCandidates(raw)
-	if len(cands) == 0 {
-		// kooky reports errors for absent browsers/profiles alongside cookies
-		// from present ones; only surface the read error if nothing usable came back.
-		if err != nil {
-			return nil, fmt.Errorf("reading browser cookies: %w", err)
-		}
-		return nil, fmt.Errorf("no github.com user_session cookie found in any supported browser — are you logged into GitHub?")
-	}
-	return selectSession(cands, validate)
+	return chooseSession(raw, err, validate)
 }

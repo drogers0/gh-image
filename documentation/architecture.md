@@ -15,6 +15,7 @@ gh-image/
 ├── internal/
 │   ├── cookies/
 │   │   ├── cookies.go               # Browser session cookie extraction via kooky
+│   │   ├── cookies_test.go
 │   │   ├── jar.go                   # GitHub cookie jar + same-site pair construction
 │   │   └── jar_test.go
 │   ├── session/
@@ -24,10 +25,13 @@ gh-image/
 │   │   └── httputil.go              # Shared User-Agent constant
 │   ├── upload/
 │   │   ├── upload.go                # Orchestrates the 3-step upload flow + HTTP client
+│   │   ├── upload_test.go
 │   │   ├── token.go                 # Fetches uploadToken from repo page
+│   │   ├── token_test.go
 │   │   └── s3.go                    # S3 presigned multipart upload
 │   └── repo/
-│       └── repo.go                  # Infers owner/repo from git remote, resolves repo ID
+│       ├── repo.go                  # Infers owner/repo from git remote, resolves repo ID
+│       └── repo_test.go
 ├── documentation/
 │   ├── architecture.md              # This file
 │   └── github-image-upload-flow.md  # Reverse-engineered upload protocol
@@ -70,13 +74,14 @@ Reads the GitHub `user_session` cookie from local browser cookie stores.
 - AES decryption and cookie DB schema differences across versions
 - Per-browser quirks for Chromium-family browsers, Firefox, Safari, and Opera
 
-**Supported browsers** (registered via blank-imported kooky finders): Chrome, Brave, Edge, Chromium, Firefox, Opera, Safari. `GetGitHubSession` queries all of them in one pass and returns the first valid `user_session` cookie found.
+**Supported browsers** (registered via blank-imported kooky finders): Chrome, Brave, Edge, Chromium, Firefox, Opera, Safari. `GetGitHubSession` queries all of them in one pass, groups the `user_session` candidates per browser store, and prefers stores that are logged in. When more than one candidate survives, `validate` is used to pick a live one (pass nil to skip network validation).
 
 ```go
-// GetGitHubSession returns the user_session cookie for github.com.
-// It searches all registered browsers in one pass and returns the cookie
-// from the first browser that has one.
-func GetGitHubSession() (*http.Cookie, error)
+// GetGitHubSession returns the best user_session cookie for github.com across
+// all registered browsers. It groups candidates per browser store, prefers
+// stores that are logged in, and when more than one survives uses validate to
+// pick a live one (pass nil to skip network validation).
+func GetGitHubSession(validate func(*http.Cookie) error) (*http.Cookie, error)
 ```
 
 The only cookie that needs to be read from the browser is `user_session`. The `__Host-user_session_same_site` cookie is a strict-SameSite duplicate with the same value, so it is synthesized rather than read separately (see Cookie Jar below). The `_gh_sess` cookie rotates with each GitHub response and is managed automatically by the HTTP client's cookie jar.
@@ -119,14 +124,14 @@ If `--repo` is not provided, the tool infers `owner/repo` from the current git w
 
 The numeric repository ID is resolved via the GitHub REST API (`gh api repos/{owner}/{repo} --jq .id`).
 
+The `git`/`gh` calls go through an injectable command `runner` (the exported
+`Resolve` wraps the production `execRun`), so remote-URL and ID parsing are
+unit-testable without a real git repo or authenticated `gh`.
+
 ```go
-// FromRemote infers the GitHub owner/repo from the git remote in the current directory.
-func FromRemote() (owner, name string, err error)
-
-// LookupID resolves the numeric repository ID via the gh CLI.
-func LookupID(owner, name string) (int, error)
-
-// Resolve returns full repo info. If owner/name are empty, it infers from the git remote.
+// Resolve returns full repo info. If owner/name are empty, it infers from the
+// git remote. Internally it delegates to unexported workers (fromRemote,
+// lookupID, resolve) that take an injectable command runner.
 func Resolve(owner, name string) (*Info, error)
 ```
 
@@ -134,13 +139,18 @@ func Resolve(owner, name string) (*Info, error)
 
 Implements the 3-step upload protocol documented in [github-image-upload-flow.md](github-image-upload-flow.md). All GitHub-bound requests use a shared `http.Client` whose cookie jar is built by `cookies.NewGitHubCookieJar`, so `_gh_sess` rotation is handled automatically.
 
+All GitHub requests are issued through a `*Client` that carries the cookie-jar
+HTTP client plus a `baseURL` (production `https://github.com`); tests point
+`baseURL` at an `httptest` server to exercise the real request/parse code.
+
 ```go
-// NewClient creates an http.Client with the GitHub session cookies set.
-func NewClient(sessionCookie *http.Cookie) *http.Client
+// NewClient creates a Client with the GitHub session cookies set and the
+// production base URL.
+func NewClient(sessionCookie *http.Cookie) *Client
 
 // Upload uploads an image file to GitHub and returns the asset URL,
 // sanitized filename, and a ready-to-paste markdown reference.
-func Upload(client *http.Client, owner, repo string, repoID int, imagePath string) (*Result, error)
+func (c *Client) Upload(owner, repo string, repoID int, imagePath string) (*Result, error)
 ```
 
 #### Token Retrieval (`token.go`)
@@ -148,9 +158,9 @@ func Upload(client *http.Client, owner, repo string, repoID int, imagePath strin
 Fetches the repository page and extracts the `uploadToken` from the embedded JavaScript payload. This token is specific to the upload endpoint — standard form CSRF tokens do not work.
 
 ```go
-// GetUploadToken fetches the repo page and extracts the uploadToken
+// getUploadToken fetches the repo page and extracts the uploadToken
 // from the JS payload. Requires authenticated cookies in the client.
-func GetUploadToken(client *http.Client, owner, repo string) (string, error)
+func (c *Client) getUploadToken(owner, repo string) (string, error)
 ```
 
 #### Upload Orchestration (`upload.go`)
@@ -158,7 +168,7 @@ func GetUploadToken(client *http.Client, owner, repo string) (string, error)
 Coordinates the full flow for a single image:
 
 ```
-GetUploadToken()
+Get upload token
         │
         ▼
 requestPolicy()        ──→  POST /upload/policies/assets
@@ -187,6 +197,13 @@ finalizeUpload()       ──→  PUT /upload/assets/{asset_id}
 Handles the multipart form construction for the S3 presigned upload. Separated from the main orchestration because the S3 request has different requirements (no cookies, no GitHub headers, just the presigned form fields and file data).
 
 ### 7. CLI Entrypoint (`main.go`)
+
+`main()` is a one-line entrypoint that delegates to a testable
+`run(args []string, stdout, stderr io.Writer, deps) int`: it returns an exit code
+instead of calling `os.Exit`, writes to injected streams, and takes its I/O
+boundaries (repo resolution, cookie resolution, upload, extract-token, check-token)
+as a `deps` struct, so the full CLI spine is exercised in tests without network,
+subprocess, or process exit.
 
 Responsibilities:
 

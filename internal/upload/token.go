@@ -37,10 +37,10 @@ func isSAMLProtected(body []byte, owner string) bool {
 	return orgSSOLink || ssoTitle
 }
 
-// GetUploadToken fetches the repo page and extracts the uploadToken
+// getUploadToken fetches the repo page and extracts the uploadToken
 // from the JS payload. Requires authenticated cookies in the client.
-func GetUploadToken(client *http.Client, owner, repo string) (string, error) {
-	url := fmt.Sprintf("https://github.com/%s/%s", owner, repo)
+func (c *Client) getUploadToken(owner, repo string) (string, error) {
+	url := fmt.Sprintf("%s/%s/%s", c.baseURL, owner, repo)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -48,7 +48,7 @@ func GetUploadToken(client *http.Client, owner, repo string) (string, error) {
 	}
 	req.Header.Set("User-Agent", httputil.UserAgent)
 
-	resp, err := client.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetching repo page: %w", err)
 	}

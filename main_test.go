@@ -1,14 +1,44 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/drogers0/gh-image/internal/repo"
 	"github.com/drogers0/gh-image/internal/upload"
 )
+
+// okDeps returns deps whose boundaries all succeed; tests override individual
+// fields to exercise specific paths.
+func okDeps() deps {
+	return deps{
+		resolveRepo: func(owner, name string) (*repo.Info, error) {
+			return &repo.Info{Owner: "octo", Name: "hello", ID: 1}, nil
+		},
+		resolveCookie: func(tokenFlag string) (*http.Cookie, string, error) {
+			return &http.Cookie{Name: "user_session", Value: "tok"}, "stub", nil
+		},
+		newUploader: func(cookie *http.Cookie) uploadFunc {
+			return func(info *repo.Info, imagePath string) (string, error) {
+				return "![" + imagePath + "](url)", nil
+			}
+		},
+		extractToken: func() (string, error) { return "extracted-token", nil },
+		checkToken:   func(tokenFlag string) (string, string, error) { return "octouser", "stub", nil },
+	}
+}
+
+// runWith executes run() with buffered streams and returns the exit code + output.
+func runWith(t *testing.T, args []string, d deps) (code int, stdout, stderr string) {
+	t.Helper()
+	var so, se bytes.Buffer
+	code = run(args, &so, &se, d)
+	return code, so.String(), se.String()
+}
 
 // TestCookieFromValue_BasicAttributes verifies the cookie has the expected fields.
 func TestCookieFromValue_BasicAttributes(t *testing.T) {
@@ -237,6 +267,232 @@ func TestResolveSessionCookie_WhitespaceFlag(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "empty") {
 		t.Errorf("expected error containing 'empty', got: %v", err)
+	}
+}
+
+func TestRun_VersionAndHelp(t *testing.T) {
+	t.Run("version prints to stdout and exits 0", func(t *testing.T) {
+		code, out, _ := runWith(t, []string{"--version"}, okDeps())
+		if code != 0 {
+			t.Fatalf("code = %d, want 0", code)
+		}
+		if !strings.Contains(out, "gh-image dev") {
+			t.Errorf("stdout = %q, want version string", out)
+		}
+	})
+	for _, flag := range []string{"--help", "-h"} {
+		t.Run(flag+" prints usage to stdout and exits 0", func(t *testing.T) {
+			code, out, _ := runWith(t, []string{flag}, okDeps())
+			if code != 0 {
+				t.Fatalf("code = %d, want 0", code)
+			}
+			if !strings.Contains(out, "Usage:") || !strings.Contains(out, "extract-token") {
+				t.Errorf("stdout missing usage content: %q", out)
+			}
+		})
+	}
+}
+
+func TestRun_FlagErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string // substring expected on stderr
+	}{
+		{"unknown long flag", []string{"--bogus"}, "unknown flag --bogus"},
+		{"unknown short flag hints --", []string{"-x"}, "use: gh image -- -x"},
+		{"repo twice", []string{"--repo", "a/b", "--repo", "c/d"}, "specified more than once"},
+		{"repo missing value", []string{"--repo"}, "requires a value"},
+		{"repo empty via =", []string{"--repo=", "img.png"}, "--repo value cannot be empty"},
+		{"repo bad format", []string{"--repo", "noslash", "img.png"}, "must be in owner/repo format"},
+		{"token twice", []string{"--token", "a", "--token", "b"}, "specified more than once"},
+		{"token missing value", []string{"--token"}, "requires a value"},
+		{"token empty value", []string{"--token", "   "}, "cannot be empty"},
+		{"no args shows usage", nil, "Usage:"},
+		{"empty image path", []string{""}, "empty image path"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _, errOut := runWith(t, tc.args, okDeps())
+			if code != 1 {
+				t.Fatalf("code = %d, want 1", code)
+			}
+			if !strings.Contains(errOut, tc.want) {
+				t.Errorf("stderr = %q, want substring %q", errOut, tc.want)
+			}
+		})
+	}
+}
+
+func TestRun_Subcommands(t *testing.T) {
+	t.Run("extract-token success", func(t *testing.T) {
+		code, out, errOut := runWith(t, []string{"extract-token"}, okDeps())
+		if code != 0 || strings.TrimSpace(out) != "extracted-token" {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+		if !strings.Contains(errOut, "Extracted session token") {
+			t.Errorf("stderr missing status: %q", errOut)
+		}
+	})
+	t.Run("extract-token error", func(t *testing.T) {
+		d := okDeps()
+		d.extractToken = func() (string, error) { return "", fmt.Errorf("no browser") }
+		code, _, errOut := runWith(t, []string{"extract-token"}, d)
+		if code != 1 || !strings.Contains(errOut, "no browser") {
+			t.Fatalf("code=%d stderr=%q", code, errOut)
+		}
+	})
+	t.Run("check-token success prints username", func(t *testing.T) {
+		code, out, errOut := runWith(t, []string{"check-token"}, okDeps())
+		if code != 0 || strings.TrimSpace(out) != "octouser" {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+		if !strings.Contains(errOut, "Token is valid (source: stub)") {
+			t.Errorf("stderr = %q", errOut)
+		}
+	})
+	t.Run("check-token empty username prints nothing to stdout", func(t *testing.T) {
+		d := okDeps()
+		d.checkToken = func(string) (string, string, error) { return "", "stub", nil }
+		code, out, _ := runWith(t, []string{"check-token"}, d)
+		if code != 0 || strings.TrimSpace(out) != "" {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+	t.Run("check-token error", func(t *testing.T) {
+		d := okDeps()
+		d.checkToken = func(string) (string, string, error) { return "", "", fmt.Errorf("expired") }
+		code, _, errOut := runWith(t, []string{"check-token"}, d)
+		if code != 1 || !strings.Contains(errOut, "expired") {
+			t.Fatalf("code=%d stderr=%q", code, errOut)
+		}
+	})
+	t.Run("extract-token with --token is a conflict error", func(t *testing.T) {
+		code, _, errOut := runWith(t, []string{"extract-token", "--token", "x"}, okDeps())
+		if code != 1 || !strings.Contains(errOut, "--token cannot be combined") {
+			t.Fatalf("code=%d stderr=%q", code, errOut)
+		}
+	})
+}
+
+func TestRun_Upload(t *testing.T) {
+	t.Run("single image prints markdown, exits 0", func(t *testing.T) {
+		code, out, _ := runWith(t, []string{"a.png"}, okDeps())
+		if code != 0 || strings.TrimSpace(out) != "![a.png](url)" {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+	t.Run("multiple images print one line each", func(t *testing.T) {
+		code, out, _ := runWith(t, []string{"a.png", "b.png"}, okDeps())
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		if code != 0 || len(lines) != 2 {
+			t.Fatalf("code=%d out=%q", code, out)
+		}
+	})
+	t.Run("partial failure exits 1 but prints successes", func(t *testing.T) {
+		d := okDeps()
+		d.newUploader = func(c *http.Cookie) uploadFunc {
+			return func(info *repo.Info, p string) (string, error) {
+				if p == "bad.png" {
+					return "", fmt.Errorf("upload failed")
+				}
+				return "![" + p + "](url)", nil
+			}
+		}
+		code, out, errOut := runWith(t, []string{"good.png", "bad.png"}, d)
+		if code != 1 {
+			t.Fatalf("code = %d, want 1", code)
+		}
+		if !strings.Contains(out, "![good.png](url)") {
+			t.Errorf("stdout missing success line: %q", out)
+		}
+		if !strings.Contains(errOut, "Error uploading bad.png") {
+			t.Errorf("stderr missing failure: %q", errOut)
+		}
+	})
+	t.Run("resolveRepo error exits 1", func(t *testing.T) {
+		d := okDeps()
+		d.resolveRepo = func(string, string) (*repo.Info, error) { return nil, fmt.Errorf("no remote") }
+		code, _, errOut := runWith(t, []string{"a.png"}, d)
+		if code != 1 || !strings.Contains(errOut, "Error resolving repository") {
+			t.Fatalf("code=%d stderr=%q", code, errOut)
+		}
+	})
+	t.Run("resolveCookie error exits 1", func(t *testing.T) {
+		d := okDeps()
+		d.resolveCookie = func(string) (*http.Cookie, string, error) { return nil, "", fmt.Errorf("no token") }
+		code, _, errOut := runWith(t, []string{"a.png"}, d)
+		if code != 1 || !strings.Contains(errOut, "Error:") {
+			t.Fatalf("code=%d stderr=%q", code, errOut)
+		}
+	})
+	t.Run("explicit --repo is parsed and passed to resolveRepo", func(t *testing.T) {
+		var gotOwner, gotName string
+		d := okDeps()
+		d.resolveRepo = func(owner, name string) (*repo.Info, error) {
+			gotOwner, gotName = owner, name
+			return &repo.Info{Owner: owner, Name: name, ID: 9}, nil
+		}
+		runWith(t, []string{"--repo", "acme/widgets", "a.png"}, d)
+		if gotOwner != "acme" || gotName != "widgets" {
+			t.Errorf("resolveRepo got %q/%q, want acme/widgets", gotOwner, gotName)
+		}
+	})
+	t.Run("-- terminator treats dash-file as a path and infers repo", func(t *testing.T) {
+		var gotOwner, gotName string
+		d := okDeps()
+		d.resolveRepo = func(owner, name string) (*repo.Info, error) {
+			gotOwner, gotName = owner, name
+			return &repo.Info{Owner: "octo", Name: "hello", ID: 1}, nil
+		}
+		code, out, _ := runWith(t, []string{"--", "-shot.png"}, d)
+		if code != 0 {
+			t.Fatalf("code = %d, want 0", code)
+		}
+		if gotOwner != "" || gotName != "" {
+			t.Errorf("expected inference path (empty owner/name), got %q/%q", gotOwner, gotName)
+		}
+		if !strings.Contains(out, "![-shot.png](url)") {
+			t.Errorf("stdout = %q", out)
+		}
+	})
+}
+
+func TestRun_UsageErrorDispatchShowsUsage(t *testing.T) {
+	// A usageError from classifySubcommand prints the usage block alongside the error.
+	code, _, errOut := runWith(t, []string{"extract-token", "extra"}, okDeps())
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(errOut, "does not take positional arguments") || !strings.Contains(errOut, "Usage:") {
+		t.Errorf("stderr = %q, want error + usage", errOut)
+	}
+}
+
+func TestResolveSessionCookie_EnvPath(t *testing.T) {
+	// Exercises the production resolveSessionCookie via the env var, so it never
+	// touches the browser: the env value wins before the browser getter is built.
+	t.Setenv("GH_SESSION_TOKEN", "env-token-value")
+	cookie, source, err := resolveSessionCookie("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cookie.Value != "env-token-value" || source != "GH_SESSION_TOKEN" {
+		t.Errorf("got value=%q source=%q", cookie.Value, source)
+	}
+}
+
+func TestResolveSessionCookie_NilGetter(t *testing.T) {
+	_, _, err := resolveSessionCookieWithGetter("", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "browser session getter is unavailable") {
+		t.Fatalf("expected nil-getter error, got %v", err)
+	}
+}
+
+func TestProductionDeps_WiringComplete(t *testing.T) {
+	d := productionDeps()
+	if d.resolveRepo == nil || d.resolveCookie == nil || d.newUploader == nil || d.extractToken == nil || d.checkToken == nil {
+		t.Fatal("productionDeps left a boundary unwired")
 	}
 }
 

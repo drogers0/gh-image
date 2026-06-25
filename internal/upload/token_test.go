@@ -1,8 +1,8 @@
 package upload
 
 import (
-	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -88,7 +88,8 @@ func TestGetUploadToken(t *testing.T) {
 	cases := []struct {
 		name        string
 		owner       string
-		body        string
+		status      int      // response status (0 => 200)
+		body        string   // response body
 		wantToken   string   // non-empty => expect success
 		errContains []string // substrings the error must include
 		errExcludes []string // substrings the error must NOT include
@@ -112,11 +113,26 @@ func TestGetUploadToken(t *testing.T) {
 			body:        `<html>just a page, no token</html>`,
 			errContains: []string{"do you have write access to octocat/hello"},
 		},
+		{
+			name:        "non-200 status reports the repo page status",
+			owner:       "octocat",
+			status:      http.StatusNotFound,
+			body:        "not found",
+			errContains: []string{"repo page returned 404"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &http.Client{Transport: stubTransport(http.StatusOK, tc.body)}
-			tok, err := GetUploadToken(client, tc.owner, "hello")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c := &Client{http: srv.Client(), baseURL: srv.URL}
+			tok, err := c.getUploadToken(tc.owner, "hello")
 
 			if tc.wantToken != "" {
 				if err != nil {
@@ -143,22 +159,4 @@ func TestGetUploadToken(t *testing.T) {
 			}
 		})
 	}
-}
-
-// stubTransport answers every request with the given status and body, so
-// GetUploadToken's hardcoded github.com URL is served locally without a network
-// call.
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func stubTransport(status int, body string) http.RoundTripper {
-	return roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: status,
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     make(http.Header),
-			Request:    r,
-		}, nil
-	})
 }

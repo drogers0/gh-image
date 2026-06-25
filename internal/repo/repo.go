@@ -15,14 +15,23 @@ type Info struct {
 	ID    int
 }
 
+// runner runs an external command and returns its stdout. Injected so the
+// git/gh subprocess boundary is stubbable in tests.
+type runner func(name string, args ...string) ([]byte, error)
+
+// execRun is the production runner; it shells out via os/exec.
+func execRun(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).Output()
+}
+
 var (
 	sshRemoteRe   = regexp.MustCompile(`git@github\.com:([^/]+)/([^/]+?)(?:\.git)?$`)
 	httpsRemoteRe = regexp.MustCompile(`https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$`)
 )
 
-// FromRemote infers the GitHub owner/repo from the git remote in the current directory.
-func FromRemote() (owner, name string, err error) {
-	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
+// fromRemote infers the GitHub owner/repo from the git remote in the current directory.
+func fromRemote(run runner) (owner, name string, err error) {
+	out, err := run("git", "remote", "get-url", "origin")
 	if err != nil {
 		return "", "", fmt.Errorf("not a git repository or no 'origin' remote configured")
 	}
@@ -38,9 +47,9 @@ func FromRemote() (owner, name string, err error) {
 	return "", "", fmt.Errorf("could not parse GitHub owner/repo from remote URL: %s", remote)
 }
 
-// LookupID resolves the numeric repository ID via the gh CLI.
-func LookupID(owner, name string) (int, error) {
-	out, err := exec.Command("gh", "api", fmt.Sprintf("repos/%s/%s", owner, name), "--jq", ".id").Output()
+// lookupID resolves the numeric repository ID via the gh CLI.
+func lookupID(run runner, owner, name string) (int, error) {
+	out, err := run("gh", "api", fmt.Sprintf("repos/%s/%s", owner, name), "--jq", ".id")
 	if err != nil {
 		return 0, fmt.Errorf("failed to look up repo ID for %s/%s (is gh CLI installed and authenticated?): %w", owner, name, err)
 	}
@@ -51,20 +60,25 @@ func LookupID(owner, name string) (int, error) {
 	return id, nil
 }
 
-// Resolve returns full repo info. If owner/name are empty, it infers from the git remote.
-func Resolve(owner, name string) (*Info, error) {
+// resolve returns full repo info, inferring owner/name from the git remote when empty.
+func resolve(run runner, owner, name string) (*Info, error) {
 	if owner == "" || name == "" {
 		var err error
-		owner, name, err = FromRemote()
+		owner, name, err = fromRemote(run)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	id, err := LookupID(owner, name)
+	id, err := lookupID(run, owner, name)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Info{Owner: owner, Name: name, ID: id}, nil
+}
+
+// Resolve returns full repo info. If owner/name are empty, it infers from the git remote.
+func Resolve(owner, name string) (*Info, error) {
+	return resolve(execRun, owner, name)
 }

@@ -13,6 +13,10 @@ import (
 
 var userLoginRe = regexp.MustCompile(`<meta name="user-login" content="([^"]+)"`)
 
+// profileURL is the endpoint CheckValidity probes. A var (not a const) so tests can
+// point CheckValidity at an httptest server and exercise it end-to-end.
+var profileURL = "https://github.com/settings/profile"
+
 // CheckValidity verifies a GitHub session cookie is valid.
 // It returns the authenticated username on success, or an error if the token
 // is invalid, expired, or if the network request fails.
@@ -34,7 +38,7 @@ func CheckValidity(sessionCookie *http.Cookie) (string, error) {
 			return http.ErrUseLastResponse
 		},
 	}
-	return checkValidity(client, "https://github.com/settings/profile", sessionCookie)
+	return checkValidity(client, profileURL, sessionCookie)
 }
 
 // checkValidity does the real work of validating a session cookie against a

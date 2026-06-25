@@ -3,8 +3,38 @@ package cookies
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/browserutils/kooky"
 )
+
+// fakeBrowser is a minimal kooky.BrowserInfo for testing the store-key derivation.
+type fakeBrowser struct{ path string }
+
+func (f fakeBrowser) Browser() string        { return "chrome" }
+func (f fakeBrowser) Profile() string        { return "default" }
+func (f fakeBrowser) IsDefaultProfile() bool { return true }
+func (f fakeBrowser) FilePath() string       { return f.path }
+
+func TestMapKookyCookies(t *testing.T) {
+	in := []*kooky.Cookie{
+		{Cookie: http.Cookie{Domain: "github.com", Name: "user_session", Value: "v1"}, Container: "c1"},
+		{Cookie: http.Cookie{Domain: "github.com", Name: "logged_in", Value: "yes"}, Container: "c2", Browser: fakeBrowser{path: "/p"}},
+	}
+	got := mapKookyCookies(in)
+	if len(got) != 2 {
+		t.Fatalf("got %d cookies, want 2", len(got))
+	}
+	// Browser nil → store is just the container.
+	if got[0].store != "c1" || got[0].name != "user_session" || got[0].value != "v1" || got[0].domain != "github.com" {
+		t.Errorf("cookie 0 = %+v", got[0])
+	}
+	// Browser set → store is FilePath()+"\x00"+Container.
+	if got[1].store != "/p\x00c2" || got[1].name != "logged_in" {
+		t.Errorf("cookie 1 = %+v", got[1])
+	}
+}
 
 func TestNewSessionCookie(t *testing.T) {
 	c := NewSessionCookie("  raw value  ")
@@ -126,6 +156,33 @@ func recordingValidator(dead ...string) (func(*http.Cookie) error, *[]string) {
 		}
 		return nil
 	}, &calls
+}
+
+func TestChooseSession(t *testing.T) {
+	t.Run("empty raw with read error wraps it", func(t *testing.T) {
+		_, err := chooseSession(nil, fmt.Errorf("keyring locked"), nil)
+		if err == nil || !strings.Contains(err.Error(), "reading browser cookies") {
+			t.Fatalf("expected wrapped read error, got %v", err)
+		}
+	})
+
+	t.Run("empty raw without read error is the not-logged-in message", func(t *testing.T) {
+		_, err := chooseSession(nil, nil, nil)
+		if err == nil || !strings.Contains(err.Error(), "no github.com user_session cookie found") {
+			t.Fatalf("expected not-logged-in message, got %v", err)
+		}
+	})
+
+	t.Run("usable candidates ignore a read error and delegate to selectSession", func(t *testing.T) {
+		raw := []rawCookie{us("A", "tok"), li("A", "yes")}
+		got, err := chooseSession(raw, fmt.Errorf("partial read error"), nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Value != "tok" {
+			t.Errorf("got %q, want tok", got.Value)
+		}
+	})
 }
 
 func cand(store, value string, loggedIn bool) sessionCandidate {
