@@ -19,8 +19,8 @@ func okDeps() deps {
 		resolveRepo: func(owner, name string) (*repo.Info, error) {
 			return &repo.Info{Owner: "octo", Name: "hello", ID: 1}, nil
 		},
-		resolveCookie: func(tokenFlag string) (*http.Cookie, string, error) {
-			return &http.Cookie{Name: "user_session", Value: "tok"}, "stub", nil
+		resolveCookie: func(tokenFlag string) (*http.Cookie, error) {
+			return &http.Cookie{Name: "user_session", Value: "tok"}, nil
 		},
 		newUploader: func(cookie *http.Cookie) uploadFunc {
 			return func(info *repo.Info, imagePath string) (string, error) {
@@ -420,7 +420,7 @@ func TestRun_Upload(t *testing.T) {
 	})
 	t.Run("resolveCookie error exits 1", func(t *testing.T) {
 		d := okDeps()
-		d.resolveCookie = func(string) (*http.Cookie, string, error) { return nil, "", fmt.Errorf("no token") }
+		d.resolveCookie = func(string) (*http.Cookie, error) { return nil, fmt.Errorf("no token") }
 		code, _, errOut := runWith(t, []string{"a.png"}, d)
 		if code != 1 || !strings.Contains(errOut, "Error:") {
 			t.Fatalf("code=%d stderr=%q", code, errOut)

@@ -17,6 +17,27 @@ func testClient(srv *httptest.Server) *Client {
 	return &Client{http: srv.Client(), baseURL: srv.URL}
 }
 
+// newServer starts an httptest server with the given handler and registers
+// cleanup, so callers don't repeat defer srv.Close().
+func newServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// newJSONServer starts a server that answers every request with the given
+// status (0 => 200) and body.
+func newJSONServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	return newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if status != 0 {
+			w.WriteHeader(status)
+		}
+		_, _ = w.Write([]byte(body))
+	})
+}
+
 // validPolicy is a policy response body with all required fields populated.
 // uploadURL is filled in per-test to point at the test server's S3 route.
 func validPolicy(uploadURL string) string {
@@ -44,7 +65,7 @@ func TestNewClient(t *testing.T) {
 func TestRequestPolicy(t *testing.T) {
 	t.Run("success parses the policy and sends the form fields", func(t *testing.T) {
 		var gotFields map[string]string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_ = r.ParseMultipartForm(1 << 20)
 			gotFields = map[string]string{}
 			for k, v := range r.MultipartForm.Value {
@@ -52,8 +73,7 @@ func TestRequestPolicy(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(validPolicy("https://s3.example/upload")))
-		}))
-		defer srv.Close()
+		})
 
 		policy, err := testClient(srv).requestPolicy("octo", "hello", "UTOKEN", 42, "pic.png", 1234, "image/png")
 		if err != nil {
@@ -74,11 +94,7 @@ func TestRequestPolicy(t *testing.T) {
 	})
 
 	t.Run("non-201 status is an error with the body", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte("denied"))
-		}))
-		defer srv.Close()
+		srv := newJSONServer(t, http.StatusForbidden, "denied")
 		_, err := testClient(srv).requestPolicy("octo", "hello", "t", 1, "f", 1, "image/png")
 		if err == nil || !strings.Contains(err.Error(), "expected 201, got 403") || !strings.Contains(err.Error(), "denied") {
 			t.Fatalf("expected 403 error with body, got %v", err)
@@ -97,11 +113,7 @@ func TestRequestPolicy(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusCreated)
-					_, _ = w.Write([]byte(tc.body))
-				}))
-				defer srv.Close()
+				srv := newJSONServer(t, http.StatusCreated, tc.body)
 				_, err := testClient(srv).requestPolicy("octo", "hello", "t", 1, "f", 1, "image/png")
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("want error %q, got %v", tc.want, err)
@@ -116,7 +128,7 @@ func TestFinalizeUpload(t *testing.T) {
 	policy.Asset.ID = 99
 
 	t.Run("success builds the full Result", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPut {
 				t.Errorf("method = %s, want PUT", r.Method)
 			}
@@ -124,8 +136,7 @@ func TestFinalizeUpload(t *testing.T) {
 				t.Errorf("path = %s, want .../upload/assets/99", r.URL.Path)
 			}
 			_, _ = w.Write([]byte(`{"href":"https://gh/assets/x","name":"pic.png"}`))
-		}))
-		defer srv.Close()
+		})
 
 		res, err := testClient(srv).finalizeUpload("octo", "hello", policy)
 		if err != nil {
@@ -137,11 +148,7 @@ func TestFinalizeUpload(t *testing.T) {
 	})
 
 	t.Run("non-200 is an error", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte("boom"))
-		}))
-		defer srv.Close()
+		srv := newJSONServer(t, http.StatusInternalServerError, "boom")
 		_, err := testClient(srv).finalizeUpload("octo", "hello", policy)
 		if err == nil || !strings.Contains(err.Error(), "expected 200, got 500") {
 			t.Fatalf("expected 500 error, got %v", err)
@@ -149,10 +156,7 @@ func TestFinalizeUpload(t *testing.T) {
 	})
 
 	t.Run("malformed json is an error", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{not json`))
-		}))
-		defer srv.Close()
+		srv := newJSONServer(t, 0, `{not json`)
 		_, err := testClient(srv).finalizeUpload("octo", "hello", policy)
 		if err == nil || !strings.Contains(err.Error(), "decoding finalize response") {
 			t.Fatalf("expected decode error, got %v", err)
@@ -175,7 +179,7 @@ func TestUploadToS3(t *testing.T) {
 
 	t.Run("success on 2xx; file is the last field", func(t *testing.T) {
 		var lastField string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
 			mr, err := r.MultipartReader()
 			if err != nil {
 				t.Fatalf("not multipart: %v", err)
@@ -188,8 +192,7 @@ func TestUploadToS3(t *testing.T) {
 				lastField = part.FormName()
 			}
 			w.WriteHeader(http.StatusNoContent)
-		}))
-		defer srv.Close()
+		})
 
 		if err := uploadToS3(policy(srv.URL), writeFile(t), "pic.png", "image/png"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -200,11 +203,7 @@ func TestUploadToS3(t *testing.T) {
 	})
 
 	t.Run("non-2xx is an error with the body", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte("policy violation"))
-		}))
-		defer srv.Close()
+		srv := newJSONServer(t, http.StatusForbidden, "policy violation")
 		err := uploadToS3(policy(srv.URL), writeFile(t), "pic.png", "image/png")
 		if err == nil || !strings.Contains(err.Error(), "S3 returned 403") || !strings.Contains(err.Error(), "policy violation") {
 			t.Fatalf("expected 403 error with body, got %v", err)
@@ -229,54 +228,23 @@ func TestUploadToS3(t *testing.T) {
 	})
 }
 
-func TestUpload_FullFlow(t *testing.T) {
+// TestUpload_Flow drives the full four-step upload flow through one server that
+// routes every step. With failStep == "" it asserts the happy-path Result;
+// otherwise it makes exactly that step fail and checks Upload's matching
+// step-wrapping error branch. Plain HTTP (not TLS): the S3 leg uses uploadToS3's
+// own bare client with the default transport.
+func TestUpload_Flow(t *testing.T) {
 	img := filepath.Join(t.TempDir(), "shot.png")
 	if err := os.WriteFile(img, []byte("pngbytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// One server routes all four steps. Plain HTTP (not TLS): the S3 leg uses
-	// uploadToS3's own bare client with the default transport.
-	mux := http.NewServeMux()
-	var srv *httptest.Server
-	mux.HandleFunc("/octo/hello", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`x={"uploadToken":"TKN"}`))
-	})
-	mux.HandleFunc("/upload/policies/assets", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(validPolicy(srv.URL + "/s3")))
-	})
-	mux.HandleFunc("/s3", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("/upload/assets/99", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"href":"https://gh/assets/x","name":"shot.png"}`))
-	})
-	srv = httptest.NewServer(mux)
-	defer srv.Close()
-
-	res, err := testClient(srv).Upload("octo", "hello", 42, img)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.Markdown != "![shot.png](https://gh/assets/x)" {
-		t.Errorf("Markdown = %q", res.Markdown)
-	}
-}
-
-// TestUpload_StepErrors drives the full flow but makes one step fail, covering
-// each of Upload's step-wrapping error branches.
-func TestUpload_StepErrors(t *testing.T) {
-	img := filepath.Join(t.TempDir(), "shot.png")
-	if err := os.WriteFile(img, []byte("png"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	cases := []struct {
 		name      string
-		failStep  string // which route returns a failure
+		failStep  string // which route returns a failure ("" => happy path)
 		wantInErr string
 	}{
+		{"success", "", ""},
 		{"step 0 token", "token", "step 0 (get upload token)"},
 		{"step 1 policy", "policy", "step 1 (request policy)"},
 		{"step 2 s3", "s3", "step 2 (S3 upload)"},
@@ -313,12 +281,21 @@ func TestUpload_StepErrors(t *testing.T) {
 					w.WriteHeader(http.StatusInternalServerError)
 					return
 				}
-				_, _ = w.Write([]byte(`{"href":"h","name":"n"}`))
+				_, _ = w.Write([]byte(`{"href":"https://gh/assets/x","name":"shot.png"}`))
 			})
 			srv = httptest.NewServer(mux)
 			defer srv.Close()
 
-			_, err := testClient(srv).Upload("octo", "hello", 42, img)
+			res, err := testClient(srv).Upload("octo", "hello", 42, img)
+			if tc.failStep == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if res.Markdown != "![shot.png](https://gh/assets/x)" {
+					t.Errorf("Markdown = %q", res.Markdown)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), tc.wantInErr) {
 				t.Fatalf("want error %q, got %v", tc.wantInErr, err)
 			}

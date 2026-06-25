@@ -2,7 +2,6 @@ package upload
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -123,16 +122,8 @@ func TestGetUploadToken(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if tc.status != 0 {
-					w.WriteHeader(tc.status)
-				}
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer srv.Close()
-
-			c := &Client{http: srv.Client(), baseURL: srv.URL}
-			tok, err := c.getUploadToken(tc.owner, "hello")
+			srv := newJSONServer(t, tc.status, tc.body)
+			tok, err := testClient(srv).getUploadToken(tc.owner, "hello")
 
 			if tc.wantToken != "" {
 				if err != nil {

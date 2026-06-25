@@ -34,7 +34,7 @@ type uploadFunc func(info *repo.Info, imagePath string) (string, error)
 // tests inject stubs so the orchestration spine runs without network/subprocess/exit.
 type deps struct {
 	resolveRepo   func(owner, name string) (*repo.Info, error)
-	resolveCookie func(tokenFlag string) (*http.Cookie, string, error)
+	resolveCookie func(tokenFlag string) (*http.Cookie, error)
 	// newUploader builds an uploader from a session cookie. It is called once per
 	// run so the underlying HTTP client (and its cookie jar) is shared across all
 	// images, matching the single-client behavior of the original implementation.
@@ -45,8 +45,11 @@ type deps struct {
 
 func productionDeps() deps {
 	return deps{
-		resolveRepo:   repo.Resolve,
-		resolveCookie: resolveSessionCookie,
+		resolveRepo: repo.Resolve,
+		resolveCookie: func(tokenFlag string) (*http.Cookie, error) {
+			cookie, _, err := resolveSessionCookie(tokenFlag)
+			return cookie, err
+		},
 		newUploader: func(cookie *http.Cookie) uploadFunc {
 			client := upload.NewClient(cookie)
 			return func(info *repo.Info, imagePath string) (string, error) {
@@ -243,7 +246,7 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 	}
 
 	// Get session cookie (flag > env var > browser)
-	cookie, _, err := d.resolveCookie(tokenFlag)
+	cookie, err := d.resolveCookie(tokenFlag)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 1
