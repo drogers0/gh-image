@@ -18,8 +18,9 @@ GitHub has **no public API** for attachment uploads — the web UI uses an inter
 endpoint that mints `user-attachments` URLs scoped to the repo's visibility.
 [`gh-image`](https://github.com/drogers0/gh-image) (MIT, © drogers0) replicates
 that flow as a `gh` CLI extension, so you can upload images or other files (PDF,
-zip, log, …) from the terminal and get ready-to-paste markdown back — an
-`![name](url)` image embed for images, or a `[name](url)` download link for other files.
+zip, log, …) from the terminal and get a ready-to-paste reference back — an
+`![name](url)` embed for images, a bare URL for videos (GitHub renders it as an
+inline player), or a `[name](url)` download link for other files.
 
 This skill drives `gh-image` and then embeds the result into a PR/issue/comment.
 
@@ -65,11 +66,13 @@ or Unicode (e.g. CleanShot's narrow spaces) work, but quote them.
 gh image "/abs/path/screenshot.png" --repo <owner>/<repo>
 ```
 
-`gh image` prints markdown to **stdout** — an image embed for images, a download
-link for other files, e.g.:
+`gh image` prints the reference to **stdout** — an image embed for images, a bare
+URL for videos (GitHub renders it as an inline player), and a download link for
+other files, e.g.:
 
 ```
 ![screenshot.png](https://github.com/user-attachments/assets/<uuid>)
+https://github.com/user-attachments/assets/<uuid>
 [report.pdf](https://github.com/user-attachments/files/<id>/report.pdf)
 ```
 

@@ -17,7 +17,7 @@
 
 ---
 
-GitHub has no public API for the attachment uploads its web UI accepts via drag-and-drop. That internal endpoint produces `user-attachments` URLs whose visibility is scoped to the repository they were uploaded to. `gh-image` replicates that flow as a `gh` CLI extension, so you can drop a screenshot — or any GitHub-supported file like a PDF, zip, or log — into a bug report, README, or Slack thread without leaving the terminal, and uploads on private repos stay private. Images render as inline embeds; other files render as download links.
+GitHub has no public API for the attachment uploads its web UI accepts via drag-and-drop. That internal endpoint produces `user-attachments` URLs whose visibility is scoped to the repository they were uploaded to. `gh-image` replicates that flow as a `gh` CLI extension, so you can drop a screenshot — or any GitHub-supported file like a PDF, zip, or log — into a bug report, README, or Slack thread without leaving the terminal, and uploads on private repos stay private. Images render as inline embeds, videos as inline players, and other files as download links.
 
 ```console
 $ gh image screenshot.png
@@ -65,10 +65,11 @@ gh image report.pdf
 gh image screenshot.png --repo owner/repo
 ```
 
-Each successful upload prints a ready-to-paste markdown reference on its own line — an inline embed for images, a download link for other files:
+Each successful upload prints a ready-to-paste reference on its own line — an inline embed for images, a bare URL for videos (which GitHub renders as an inline player), and a download link for other files:
 
 ```
 ![hero.png](https://github.com/user-attachments/assets/…)
+https://github.com/user-attachments/assets/…
 [report.pdf](https://github.com/user-attachments/files/…/report.pdf)
 ```
 
@@ -172,7 +173,7 @@ jobs:
 3. Requests an S3 upload policy from `/upload/policies/assets`.
 4. Uploads the file directly to S3 using the presigned form fields.
 5. Calls back to GitHub to finalize the asset, using the finalize endpoint GitHub returns in the policy (`/upload/assets/{id}` for images, `/upload/repository-files/{id}` for other files).
-6. Prints `![name](url)` for images, or `[name](url)` for other files, to stdout.
+6. Prints the reference to stdout: `![name](url)` for images, the bare URL for videos (GitHub renders it as an inline player), or `[name](url)` for other files.
 
 The final URL is `https://github.com/user-attachments/assets/<uuid>` for images and `https://github.com/user-attachments/files/<id>/<name>` for other files — visibility inherits from the target repository, so a private-repo upload requires authentication to view.
 

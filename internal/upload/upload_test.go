@@ -428,6 +428,8 @@ func TestRenderMarkdown(t *testing.T) {
 	}{
 		{"image/png", "![f](https://gh/x)"},
 		{"image/svg+xml", "![f](https://gh/x)"},
+		{"video/mp4", "https://gh/x"},       // bare URL -> inline player
+		{"video/quicktime", "https://gh/x"}, // .mov
 		{"application/pdf", "[f](https://gh/x)"},
 		{"application/zip", "[f](https://gh/x)"},
 		{"application/octet-stream", "[f](https://gh/x)"},

@@ -22,7 +22,7 @@ import (
 type Result struct {
 	URL      string // https://github.com/user-attachments/assets/<uuid> (images) or /files/<id>/<name>
 	Name     string // sanitized filename
-	Markdown string // ![name](url) for images, [name](url) for other files
+	Markdown string // ![name](url) for images, bare url for videos, [name](url) for other files
 }
 
 // policyResponse represents the JSON response from /upload/policies/assets.
@@ -216,14 +216,22 @@ func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse, cont
 	}, nil
 }
 
-// renderMarkdown returns the markdown GitHub itself emits on drag-and-drop:
-// an inline image embed (![]()) for images, and a plain download link ([]())
-// for every other attachment type (PDF, zip, docx, ...).
+// renderMarkdown returns the reference GitHub itself produces on drag-and-drop,
+// which differs by media type:
+//   - images: an inline embed, ![name](url)
+//   - videos: the bare asset URL. GitHub renders a user-attachments video asset
+//     as an inline <video> player when its URL sits on its own line; wrapping it
+//     in link or embed syntax would only show a link, so we emit the raw URL.
+//   - everything else (PDF, zip, docx, ...): a plain download link, [name](url)
 func renderMarkdown(name, href, contentType string) string {
-	if strings.HasPrefix(contentType, "image/") {
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
 		return fmt.Sprintf("![%s](%s)", name, href)
+	case strings.HasPrefix(contentType, "video/"):
+		return href
+	default:
+		return fmt.Sprintf("[%s](%s)", name, href)
 	}
-	return fmt.Sprintf("[%s](%s)", name, href)
 }
 
 // githubContentType overrides Go's mime table for extensions whose
