@@ -43,7 +43,7 @@ func newJSONServer(t *testing.T, status int, body string) *httptest.Server {
 func validPolicy(uploadURL string) string {
 	return fmt.Sprintf(`{
 		"upload_url": %q,
-		"asset": {"id": 99, "name": "pic.png"},
+		"asset": {"id": 99, "name": "pic.png", "content_type": "image/png"},
 		"form": {"key": "k", "policy": "p"},
 		"asset_upload_url": "/upload/assets/99",
 		"asset_upload_authenticity_token": "AUTH"
@@ -110,6 +110,7 @@ func TestRequestPolicy(t *testing.T) {
 			{"no auth token", `{"upload_url":"u","asset":{"id":1},"form":{"k":"v"}}`, "missing asset_upload_authenticity_token"},
 			{"no form", `{"upload_url":"u","asset":{"id":1},"asset_upload_authenticity_token":"a"}`, "missing form fields"},
 			{"no asset id", `{"upload_url":"u","form":{"k":"v"},"asset_upload_authenticity_token":"a"}`, "missing asset ID"},
+			{"no content_type", `{"upload_url":"u","asset":{"id":1},"form":{"k":"v"},"asset_upload_url":"/x","asset_upload_authenticity_token":"a"}`, "missing asset content_type"},
 			{"no asset_upload_url", `{"upload_url":"u","asset":{"id":1},"form":{"k":"v"},"asset_upload_authenticity_token":"a"}`, "missing asset_upload_url"},
 			{"asset_upload_url not root-relative", `{"upload_url":"u","asset":{"id":1},"form":{"k":"v"},"asset_upload_url":"99","asset_upload_authenticity_token":"a"}`, "is not a root-relative path"},
 			{"bad json", `{not json`, "decoding policy response"},
@@ -129,6 +130,7 @@ func TestRequestPolicy(t *testing.T) {
 func TestFinalizeUpload(t *testing.T) {
 	imagePolicy := &policyResponse{AssetUploadURL: "/upload/assets/99", AssetUploadAuthenticityToken: "AUTH"}
 	imagePolicy.Asset.ID = 99
+	imagePolicy.Asset.ContentType = "image/png"
 
 	t.Run("success builds the full Result", func(t *testing.T) {
 		srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +143,7 @@ func TestFinalizeUpload(t *testing.T) {
 			_, _ = w.Write([]byte(`{"href":"https://gh/assets/x","name":"pic.png"}`))
 		})
 
-		res, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy, "image/png")
+		res, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -153,13 +155,14 @@ func TestFinalizeUpload(t *testing.T) {
 	t.Run("non-image file PUTs the server-provided path and renders a download link", func(t *testing.T) {
 		filePolicy := &policyResponse{AssetUploadURL: "/upload/repository-files/99", AssetUploadAuthenticityToken: "AUTH"}
 		filePolicy.Asset.ID = 99
+		filePolicy.Asset.ContentType = "application/pdf"
 		var gotPath string
 		srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
 			gotPath = r.URL.Path
 			_, _ = w.Write([]byte(`{"href":"https://gh/files/99/cheatsheet.pdf","name":"cheatsheet.pdf"}`))
 		})
 
-		res, err := testClient(srv).finalizeUpload("octo", "hello", filePolicy, "application/pdf")
+		res, err := testClient(srv).finalizeUpload("octo", "hello", filePolicy)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -173,7 +176,7 @@ func TestFinalizeUpload(t *testing.T) {
 
 	t.Run("non-200 is an error", func(t *testing.T) {
 		srv := newJSONServer(t, http.StatusInternalServerError, "boom")
-		_, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy, "image/png")
+		_, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy)
 		if err == nil || !strings.Contains(err.Error(), "expected 200, got 500") {
 			t.Fatalf("expected 500 error, got %v", err)
 		}
@@ -181,7 +184,7 @@ func TestFinalizeUpload(t *testing.T) {
 
 	t.Run("malformed json is an error", func(t *testing.T) {
 		srv := newJSONServer(t, 0, `{not json`)
-		_, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy, "image/png")
+		_, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy)
 		if err == nil || !strings.Contains(err.Error(), "decoding finalize response") {
 			t.Fatalf("expected decode error, got %v", err)
 		}
@@ -347,7 +350,7 @@ func TestUpload_Flow_NonImage(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(fmt.Sprintf(`{
 			"upload_url": %q,
-			"asset": {"id": 99, "name": "report.pdf"},
+			"asset": {"id": 99, "name": "report.pdf", "content_type": "application/pdf"},
 			"form": {"key": "k", "policy": "p"},
 			"asset_upload_url": "/upload/repository-files/99",
 			"asset_upload_authenticity_token": "AUTH"

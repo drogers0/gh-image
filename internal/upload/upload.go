@@ -94,7 +94,7 @@ func (c *Client) Upload(owner, repo string, repoID int, path string) (*Result, e
 	}
 
 	// Step 3: Finalize the upload
-	result, err := c.finalizeUpload(owner, repo, policy, contentType)
+	result, err := c.finalizeUpload(owner, repo, policy)
 	if err != nil {
 		return nil, fmt.Errorf("step 3 (finalize): %w", err)
 	}
@@ -165,13 +165,21 @@ func (c *Client) requestPolicy(owner, repo, uploadToken string, repoID int, file
 	if !strings.HasPrefix(policy.AssetUploadURL, "/") {
 		return nil, fmt.Errorf("policy response asset_upload_url %q is not a root-relative path", policy.AssetUploadURL)
 	}
+	// content_type drives the render form (embed / video player / link), so a
+	// response without it is unusable even though the upload itself would succeed.
+	if policy.Asset.ContentType == "" {
+		return nil, fmt.Errorf("policy response missing asset content_type")
+	}
 
 	return &policy, nil
 }
 
 // finalizeUpload PUTs to the policy's asset_upload_url to mark the asset as
-// ready, then builds the markdown reference based on the file's content type.
-func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse, contentType string) (*Result, error) {
+// ready, then builds the markdown reference. The render form keys off the
+// content type GitHub assigned the asset (policy.Asset.ContentType), which is
+// the same signal GitHub's own renderer uses, so our output always matches how
+// GitHub will display it.
+func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse) (*Result, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	if err := writer.WriteField("authenticity_token", policy.AssetUploadAuthenticityToken); err != nil {
@@ -212,7 +220,7 @@ func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse, cont
 	return &Result{
 		URL:      result.Href,
 		Name:     result.Name,
-		Markdown: renderMarkdown(result.Name, result.Href, contentType),
+		Markdown: renderMarkdown(result.Name, result.Href, policy.Asset.ContentType),
 	}, nil
 }
 
