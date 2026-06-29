@@ -175,10 +175,12 @@ func (c *Client) requestPolicy(owner, repo, uploadToken string, repoID int, file
 }
 
 // finalizeUpload PUTs to the policy's asset_upload_url to mark the asset as
-// ready, then builds the markdown reference. The render form keys off the
-// content type GitHub assigned the asset (policy.Asset.ContentType), which is
-// the same signal GitHub's own renderer uses, so our output always matches how
-// GitHub will display it.
+// ready, then builds the markdown reference. The render form keys off
+// policy.Asset.ContentType — GitHub's echo of the content_type we sent in the
+// policy request, not an independent classification. In practice it tracks how
+// GitHub routes and renders the asset (verified incl. SVG, which routes to the
+// image path and embeds inline); the href shape (/assets/ vs /files/) is the
+// only strictly authoritative routing signal if these ever diverge.
 func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse) (*Result, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
