@@ -23,8 +23,11 @@ func okDeps() deps {
 			return &http.Cookie{Name: "user_session", Value: "tok"}, nil
 		},
 		newUploader: func(cookie *http.Cookie) uploadFunc {
-			return func(info *repo.Info, imagePath string) (string, error) {
-				return "![" + imagePath + "](url)", nil
+			// The stub returns image-embed markdown for any path; run()'s job is the
+			// orchestration spine, not the embed-vs-link decision (that lives in
+			// upload.renderMarkdown and is covered by TestRenderMarkdown).
+			return func(info *repo.Info, path string) (string, error) {
+				return "![" + path + "](url)", nil
 			}
 		},
 		extractToken: func() (string, error) { return "extracted-token", nil },
@@ -309,7 +312,7 @@ func TestRun_FlagErrors(t *testing.T) {
 		{"token missing value", []string{"--token"}, "requires a value"},
 		{"token empty value", []string{"--token", "   "}, "cannot be empty"},
 		{"no args shows usage", nil, "Usage:"},
-		{"empty image path", []string{""}, "empty image path"},
+		{"empty file path", []string{""}, "empty file path"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -376,13 +379,13 @@ func TestRun_Subcommands(t *testing.T) {
 }
 
 func TestRun_Upload(t *testing.T) {
-	t.Run("single image prints markdown, exits 0", func(t *testing.T) {
+	t.Run("single file prints markdown, exits 0", func(t *testing.T) {
 		code, out, _ := runWith(t, []string{"a.png"}, okDeps())
 		if code != 0 || strings.TrimSpace(out) != "![a.png](url)" {
 			t.Fatalf("code=%d out=%q", code, out)
 		}
 	})
-	t.Run("multiple images print one line each", func(t *testing.T) {
+	t.Run("multiple files print one line each", func(t *testing.T) {
 		code, out, _ := runWith(t, []string{"a.png", "b.png"}, okDeps())
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		if code != 0 || len(lines) != 2 {
@@ -499,7 +502,7 @@ func TestProductionDeps_WiringComplete(t *testing.T) {
 func TestClassifySubcommand(t *testing.T) {
 	tests := []struct {
 		name                    string
-		imagePaths              []string
+		paths                   []string
 		firstPosAfterDoubleDash bool
 		tokenFlag               string
 		repoSet                 bool
@@ -509,58 +512,58 @@ func TestClassifySubcommand(t *testing.T) {
 	}{
 		{
 			name:           "extract-token selected",
-			imagePaths:     []string{"extract-token"},
+			paths:          []string{"extract-token"},
 			wantSubcommand: "extract-token",
 		},
 		{
 			name:           "check-token selected",
-			imagePaths:     []string{"check-token"},
+			paths:          []string{"check-token"},
 			wantSubcommand: "check-token",
 		},
 		{
 			name:                    "double-dash treats check-token as filename",
-			imagePaths:              []string{"check-token"},
+			paths:                   []string{"check-token"},
 			firstPosAfterDoubleDash: true,
 			wantSubcommand:          "",
 		},
 		{
 			name:                    "double-dash treats extract-token as filename",
-			imagePaths:              []string{"extract-token"},
+			paths:                   []string{"extract-token"},
 			firstPosAfterDoubleDash: true,
 			wantSubcommand:          "",
 		},
 		{
 			name:            "extract-token with extra args errors",
-			imagePaths:      []string{"extract-token", "extra"},
+			paths:           []string{"extract-token", "extra"},
 			wantErrContains: "does not take positional arguments",
 			wantUsageError:  true,
 		},
 		{
 			name:            "check-token with extra args errors",
-			imagePaths:      []string{"check-token", "extra"},
+			paths:           []string{"check-token", "extra"},
 			wantErrContains: "does not take positional arguments",
 			wantUsageError:  true,
 		},
 		{
 			name:            "extract-token with token flag errors",
-			imagePaths:      []string{"extract-token"},
+			paths:           []string{"extract-token"},
 			tokenFlag:       "abc123",
 			wantErrContains: "--token cannot be combined",
 		},
 		{
 			name:           "non-subcommand remains upload mode",
-			imagePaths:     []string{"image.png"},
+			paths:          []string{"image.png"},
 			wantSubcommand: "",
 		},
 		{
 			name:            "extract-token with repo flag errors",
-			imagePaths:      []string{"extract-token"},
+			paths:           []string{"extract-token"},
 			repoSet:         true,
 			wantErrContains: "--repo cannot be combined with extract-token",
 		},
 		{
 			name:            "check-token with repo flag errors",
-			imagePaths:      []string{"check-token"},
+			paths:           []string{"check-token"},
 			repoSet:         true,
 			wantErrContains: "--repo cannot be combined with check-token",
 		},
@@ -568,7 +571,7 @@ func TestClassifySubcommand(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotSubcommand, err := classifySubcommand(tc.imagePaths, tc.firstPosAfterDoubleDash, tc.tokenFlag, tc.repoSet)
+			gotSubcommand, err := classifySubcommand(tc.paths, tc.firstPosAfterDoubleDash, tc.tokenFlag, tc.repoSet)
 			if tc.wantErrContains != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErrContains)

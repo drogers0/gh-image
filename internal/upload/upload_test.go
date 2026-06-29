@@ -43,8 +43,9 @@ func newJSONServer(t *testing.T, status int, body string) *httptest.Server {
 func validPolicy(uploadURL string) string {
 	return fmt.Sprintf(`{
 		"upload_url": %q,
-		"asset": {"id": 99, "name": "pic.png"},
+		"asset": {"id": 99, "name": "pic.png", "content_type": "image/png"},
 		"form": {"key": "k", "policy": "p"},
+		"asset_upload_url": "/upload/assets/99",
 		"asset_upload_authenticity_token": "AUTH"
 	}`, uploadURL)
 }
@@ -109,6 +110,9 @@ func TestRequestPolicy(t *testing.T) {
 			{"no auth token", `{"upload_url":"u","asset":{"id":1},"form":{"k":"v"}}`, "missing asset_upload_authenticity_token"},
 			{"no form", `{"upload_url":"u","asset":{"id":1},"asset_upload_authenticity_token":"a"}`, "missing form fields"},
 			{"no asset id", `{"upload_url":"u","form":{"k":"v"},"asset_upload_authenticity_token":"a"}`, "missing asset ID"},
+			{"no content_type", `{"upload_url":"u","asset":{"id":1},"form":{"k":"v"},"asset_upload_url":"/x","asset_upload_authenticity_token":"a"}`, "missing asset content_type"},
+			{"no asset_upload_url", `{"upload_url":"u","asset":{"id":1},"form":{"k":"v"},"asset_upload_authenticity_token":"a"}`, "missing asset_upload_url"},
+			{"asset_upload_url not root-relative", `{"upload_url":"u","asset":{"id":1},"form":{"k":"v"},"asset_upload_url":"99","asset_upload_authenticity_token":"a"}`, "is not a root-relative path"},
 			{"bad json", `{not json`, "decoding policy response"},
 		}
 		for _, tc := range cases {
@@ -124,8 +128,9 @@ func TestRequestPolicy(t *testing.T) {
 }
 
 func TestFinalizeUpload(t *testing.T) {
-	policy := &policyResponse{AssetUploadAuthenticityToken: "AUTH"}
-	policy.Asset.ID = 99
+	imagePolicy := &policyResponse{AssetUploadURL: "/upload/assets/99", AssetUploadAuthenticityToken: "AUTH"}
+	imagePolicy.Asset.ID = 99
+	imagePolicy.Asset.ContentType = "image/png"
 
 	t.Run("success builds the full Result", func(t *testing.T) {
 		srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +143,7 @@ func TestFinalizeUpload(t *testing.T) {
 			_, _ = w.Write([]byte(`{"href":"https://gh/assets/x","name":"pic.png"}`))
 		})
 
-		res, err := testClient(srv).finalizeUpload("octo", "hello", policy)
+		res, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -147,9 +152,31 @@ func TestFinalizeUpload(t *testing.T) {
 		}
 	})
 
+	t.Run("non-image file PUTs the server-provided path and renders a download link", func(t *testing.T) {
+		filePolicy := &policyResponse{AssetUploadURL: "/upload/repository-files/99", AssetUploadAuthenticityToken: "AUTH"}
+		filePolicy.Asset.ID = 99
+		filePolicy.Asset.ContentType = "application/pdf"
+		var gotPath string
+		srv := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"href":"https://gh/files/99/cheatsheet.pdf","name":"cheatsheet.pdf"}`))
+		})
+
+		res, err := testClient(srv).finalizeUpload("octo", "hello", filePolicy)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotPath != "/upload/repository-files/99" {
+			t.Errorf("finalize path = %q, want /upload/repository-files/99", gotPath)
+		}
+		if res.Markdown != "[cheatsheet.pdf](https://gh/files/99/cheatsheet.pdf)" {
+			t.Errorf("Markdown = %q, want a plain link", res.Markdown)
+		}
+	})
+
 	t.Run("non-200 is an error", func(t *testing.T) {
 		srv := newJSONServer(t, http.StatusInternalServerError, "boom")
-		_, err := testClient(srv).finalizeUpload("octo", "hello", policy)
+		_, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy)
 		if err == nil || !strings.Contains(err.Error(), "expected 200, got 500") {
 			t.Fatalf("expected 500 error, got %v", err)
 		}
@@ -157,7 +184,7 @@ func TestFinalizeUpload(t *testing.T) {
 
 	t.Run("malformed json is an error", func(t *testing.T) {
 		srv := newJSONServer(t, 0, `{not json`)
-		_, err := testClient(srv).finalizeUpload("octo", "hello", policy)
+		_, err := testClient(srv).finalizeUpload("octo", "hello", imagePolicy)
 		if err == nil || !strings.Contains(err.Error(), "decoding finalize response") {
 			t.Fatalf("expected decode error, got %v", err)
 		}
@@ -168,7 +195,7 @@ func TestUploadToS3(t *testing.T) {
 	writeFile := func(t *testing.T) string {
 		t.Helper()
 		p := filepath.Join(t.TempDir(), "pic.png")
-		if err := os.WriteFile(p, []byte("imagedata"), 0o600); err != nil {
+		if err := os.WriteFile(p, []byte("filedata"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		return p
@@ -303,6 +330,54 @@ func TestUpload_Flow(t *testing.T) {
 	}
 }
 
+// TestUpload_Flow_NonImage runs the full four-step flow for a non-image file and
+// confirms the finalize PUT follows the policy's asset_upload_url
+// (/upload/repository-files/{id}, not the image /upload/assets/{id}) and that the
+// result is a plain download link rather than an image embed.
+func TestUpload_Flow_NonImage(t *testing.T) {
+	pdf := filepath.Join(t.TempDir(), "report.pdf")
+	if err := os.WriteFile(pdf, []byte("%PDF-1.4"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	var finalizePath string
+	mux.HandleFunc("/octo/hello", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`x={"uploadToken":"TKN"}`))
+	})
+	mux.HandleFunc("/upload/policies/assets", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"upload_url": %q,
+			"asset": {"id": 99, "name": "report.pdf", "content_type": "application/pdf"},
+			"form": {"key": "k", "policy": "p"},
+			"asset_upload_url": "/upload/repository-files/99",
+			"asset_upload_authenticity_token": "AUTH"
+		}`, srv.URL+"/s3")))
+	})
+	mux.HandleFunc("/s3", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/upload/repository-files/99", func(w http.ResponseWriter, r *http.Request) {
+		finalizePath = r.URL.Path
+		_, _ = w.Write([]byte(`{"href":"https://gh/files/99/report.pdf","name":"report.pdf"}`))
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	res, err := testClient(srv).Upload("octo", "hello", 42, pdf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if finalizePath != "/upload/repository-files/99" {
+		t.Errorf("finalize path = %q, want /upload/repository-files/99", finalizePath)
+	}
+	if res.Markdown != "[report.pdf](https://gh/files/99/report.pdf)" {
+		t.Errorf("Markdown = %q, want a download link", res.Markdown)
+	}
+}
+
 func TestGetUploadToken_NetworkError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	url := srv.URL
@@ -317,19 +392,55 @@ func TestGetUploadToken_NetworkError(t *testing.T) {
 func TestUpload_StatErrorBeforeRequests(t *testing.T) {
 	c := NewClient(&http.Cookie{Name: "user_session", Value: "t"})
 	_, err := c.Upload("octo", "hello", 1, filepath.Join(t.TempDir(), "missing.png"))
-	if err == nil || !strings.Contains(err.Error(), "image file:") {
-		t.Fatalf("expected image-file error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "file:") {
+		t.Fatalf("expected stat-file error, got %v", err)
 	}
 }
 
 func TestDetectContentType(t *testing.T) {
-	// Make the test hermetic: minimal CI images may lack .png in the mime registry.
+	// Make the test hermetic: minimal CI images may lack these in the mime registry.
 	_ = mime.AddExtensionType(".png", "image/png")
-	if ct := detectContentType("a.png"); !strings.HasPrefix(ct, "image/png") {
-		t.Errorf("detectContentType(.png) = %q, want image/png prefix", ct)
+	_ = mime.AddExtensionType(".pdf", "application/pdf")
+	// A text type carrying a charset parameter, to prove the parameter is stripped:
+	// GitHub's content_type allowlist rejects the parameterized form.
+	_ = mime.AddExtensionType(".txt", "text/plain; charset=utf-8")
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"a.png", "image/png"},
+		{"a.pdf", "application/pdf"},
+		{"notes.txt", "text/plain"},           // charset parameter stripped
+		{"server.log", "text/x-log"},          // GitHub override (Go reports text/plain)
+		{"SERVER.LOG", "text/x-log"},          // override is case-insensitive
+		{"a.zzz", "application/octet-stream"}, // unknown extension
 	}
-	if ct := detectContentType("a.zzz"); ct != "application/octet-stream" {
-		t.Errorf("detectContentType(.zzz) = %q, want application/octet-stream", ct)
+	for _, tc := range cases {
+		if got := detectContentType(tc.path); got != tc.want {
+			t.Errorf("detectContentType(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestRenderMarkdown(t *testing.T) {
+	const name, href = "f", "https://gh/x"
+	cases := []struct {
+		contentType string
+		want        string
+	}{
+		{"image/png", "![f](https://gh/x)"},
+		{"image/svg+xml", "![f](https://gh/x)"},
+		{"video/mp4", "https://gh/x"},       // bare URL -> inline player
+		{"video/quicktime", "https://gh/x"}, // .mov
+		{"application/pdf", "[f](https://gh/x)"},
+		{"application/zip", "[f](https://gh/x)"},
+		{"application/octet-stream", "[f](https://gh/x)"},
+	}
+	for _, tc := range cases {
+		if got := renderMarkdown(name, href, tc.contentType); got != tc.want {
+			t.Errorf("renderMarkdown(%q) = %q, want %q", tc.contentType, got, tc.want)
+		}
 	}
 }
 

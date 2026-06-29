@@ -15,7 +15,7 @@ import (
 )
 
 const usage = `Usage:
-  gh image [--repo owner/repo] [--token <value>] <image-path>...
+  gh image [--repo owner/repo] [--token <value>] <file-path>...
   gh image extract-token
   gh image check-token [--token <value>]
   gh image --version`
@@ -27,8 +27,8 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, productionDeps()))
 }
 
-// uploadFunc uploads one image and returns its markdown reference.
-type uploadFunc func(info *repo.Info, imagePath string) (string, error)
+// uploadFunc uploads one file and returns its markdown reference.
+type uploadFunc func(info *repo.Info, path string) (string, error)
 
 // deps are the I/O boundaries run() depends on; productionDeps wires the real ones,
 // tests inject stubs so the orchestration spine runs without network/subprocess/exit.
@@ -37,7 +37,7 @@ type deps struct {
 	resolveCookie func(tokenFlag string) (*http.Cookie, error)
 	// newUploader builds an uploader from a session cookie. It is called once per
 	// run so the underlying HTTP client (and its cookie jar) is shared across all
-	// images, matching the single-client behavior of the original implementation.
+	// files, matching the single-client behavior of the original implementation.
 	newUploader  func(cookie *http.Cookie) uploadFunc
 	extractToken func() (string, error)
 	checkToken   func(tokenFlag string) (username, source string, err error)
@@ -52,8 +52,8 @@ func productionDeps() deps {
 		},
 		newUploader: func(cookie *http.Cookie) uploadFunc {
 			client := upload.NewClient(cookie)
-			return func(info *repo.Info, imagePath string) (string, error) {
-				res, err := client.Upload(info.Owner, info.Name, info.ID, imagePath)
+			return func(info *repo.Info, path string) (string, error) {
+				res, err := client.Upload(info.Owner, info.Name, info.ID, path)
 				if err != nil {
 					return "", err
 				}
@@ -75,7 +75,7 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 	var repoSet bool
 	var tokenFlag string
 	var tokenSet bool
-	var imagePaths []string
+	var paths []string
 	var firstPosAfterDoubleDash bool
 
 	// Manual arg parsing so flags can appear anywhere (before or after positional args).
@@ -85,10 +85,10 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 
 		// After "--", everything is a positional arg
 		if flagsDone {
-			if len(imagePaths) == 0 {
+			if len(paths) == 0 {
 				firstPosAfterDoubleDash = true
 			}
-			imagePaths = append(imagePaths, arg)
+			paths = append(paths, arg)
 			continue
 		}
 
@@ -146,7 +146,7 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 			return 0
 		case arg == "--help" || arg == "-h":
 			fmt.Fprintf(stdout, "%s\n\n", usage)
-			fmt.Fprintln(stdout, "Upload images to GitHub and print markdown references.")
+			fmt.Fprintln(stdout, "Upload images and files to GitHub and print markdown references.")
 			fmt.Fprintln(stdout)
 			fmt.Fprintln(stdout, "The --repo flag is optional. If omitted, the repository is")
 			fmt.Fprintln(stdout, "inferred from the git remote in the current directory.")
@@ -174,12 +174,12 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 			fmt.Fprintf(stderr, "Run 'gh image --help' for usage.\n")
 			return 1
 		default:
-			imagePaths = append(imagePaths, arg)
+			paths = append(paths, arg)
 		}
 	}
 
 	// Dispatch subcommands before any other validation.
-	subcommand, dispatchErr := classifySubcommand(imagePaths, firstPosAfterDoubleDash, tokenFlag, repoSet)
+	subcommand, dispatchErr := classifySubcommand(paths, firstPosAfterDoubleDash, tokenFlag, repoSet)
 	if dispatchErr != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", dispatchErr)
 		var ue *usageError
@@ -211,15 +211,15 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		return 0
 	}
 
-	if len(imagePaths) == 0 {
+	if len(paths) == 0 {
 		fmt.Fprintf(stderr, "%s\nRun 'gh image --help' for usage.\n", usage)
 		return 1
 	}
 
-	// Validate image paths early
-	for _, p := range imagePaths {
+	// Validate file paths early
+	for _, p := range paths {
 		if p == "" {
-			fmt.Fprintf(stderr, "Error: empty image path\n")
+			fmt.Fprintf(stderr, "Error: empty file path\n")
 			return 1
 		}
 	}
@@ -252,15 +252,15 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		return 1
 	}
 
-	// Build the uploader once so its HTTP client/cookie jar is shared across images.
-	uploadImage := d.newUploader(cookie)
+	// Build the uploader once so its HTTP client/cookie jar is shared across files.
+	uploadFile := d.newUploader(cookie)
 
-	// Upload each image, continuing on error
+	// Upload each file, continuing on error
 	hasError := false
-	for _, imagePath := range imagePaths {
-		markdown, err := uploadImage(repoInfo, imagePath)
+	for _, path := range paths {
+		markdown, err := uploadFile(repoInfo, path)
 		if err != nil {
-			fmt.Fprintf(stderr, "Error uploading %s: %v\n", imagePath, err)
+			fmt.Fprintf(stderr, "Error uploading %s: %v\n", path, err)
 			hasError = true
 			continue
 		}
@@ -279,13 +279,13 @@ func (e *usageError) Error() string { return e.err.Error() }
 
 // classifySubcommand identifies whether the parsed positional args represent a
 // supported subcommand invocation and validates subcommand-specific constraints.
-func classifySubcommand(imagePaths []string, firstPosAfterDoubleDash bool, tokenFlag string, repoSet bool) (string, error) {
-	if len(imagePaths) == 0 || firstPosAfterDoubleDash {
+func classifySubcommand(paths []string, firstPosAfterDoubleDash bool, tokenFlag string, repoSet bool) (string, error) {
+	if len(paths) == 0 || firstPosAfterDoubleDash {
 		return "", nil
 	}
-	switch imagePaths[0] {
+	switch paths[0] {
 	case "extract-token":
-		if len(imagePaths) > 1 {
+		if len(paths) > 1 {
 			return "", &usageError{fmt.Errorf("extract-token does not take positional arguments")}
 		}
 		if tokenFlag != "" {
@@ -296,7 +296,7 @@ func classifySubcommand(imagePaths []string, firstPosAfterDoubleDash bool, token
 		}
 		return "extract-token", nil
 	case "check-token":
-		if len(imagePaths) > 1 {
+		if len(paths) > 1 {
 			return "", &usageError{fmt.Errorf("check-token does not take positional arguments")}
 		}
 		if repoSet {
