@@ -11,17 +11,18 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/drogers0/gh-image/internal/cookies"
 	"github.com/drogers0/gh-image/internal/httputil"
 )
 
-// Result holds the output of a successful image upload.
+// Result holds the output of a successful file upload.
 type Result struct {
-	URL      string // https://github.com/user-attachments/assets/<uuid>
+	URL      string // https://github.com/user-attachments/assets/<uuid> (images) or /files/<id>/<name>
 	Name     string // sanitized filename
-	Markdown string // ![name](url)
+	Markdown string // ![name](url) for images, [name](url) for other files
 }
 
 // policyResponse represents the JSON response from /upload/policies/assets.
@@ -34,8 +35,13 @@ type policyResponse struct {
 		ContentType string `json:"content_type"`
 		Href        string `json:"href"`
 	} `json:"asset"`
-	Form                         map[string]string `json:"form"`
-	AssetUploadAuthenticityToken string            `json:"asset_upload_authenticity_token"`
+	Form map[string]string `json:"form"`
+	// AssetUploadURL is the path to PUT to finalize the upload. GitHub routes
+	// images to /upload/assets/{id} and other files (PDF, zip, ...) to
+	// /upload/repository-files/{id}; using the server-provided path means we
+	// don't hardcode either and follow whatever GitHub chooses per file type.
+	AssetUploadURL               string `json:"asset_upload_url"`
+	AssetUploadAuthenticityToken string `json:"asset_upload_authenticity_token"`
 }
 
 // Client carries the HTTP client (with GitHub session cookies) and the base URL
@@ -59,15 +65,15 @@ func NewClient(sessionCookie *http.Cookie) *Client {
 	}
 }
 
-// Upload uploads an image file to GitHub and returns the asset URL.
+// Upload uploads a file to GitHub and returns the asset URL.
 // owner/repo identifies the target repository, repoID is its numeric ID.
-func (c *Client) Upload(owner, repo string, repoID int, imagePath string) (*Result, error) {
-	info, err := os.Stat(imagePath)
+func (c *Client) Upload(owner, repo string, repoID int, path string) (*Result, error) {
+	info, err := os.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf("image file: %w", err)
+		return nil, fmt.Errorf("file: %w", err)
 	}
-	contentType := detectContentType(imagePath)
-	fileName := filepath.Base(imagePath)
+	contentType := detectContentType(path)
+	fileName := filepath.Base(path)
 
 	// Step 0: Get uploadToken from repo page
 	uploadToken, err := c.getUploadToken(owner, repo)
@@ -82,13 +88,13 @@ func (c *Client) Upload(owner, repo string, repoID int, imagePath string) (*Resu
 	}
 
 	// Step 2: Upload file to S3
-	err = uploadToS3(policy, imagePath, fileName, contentType)
+	err = uploadToS3(policy, path, fileName, contentType)
 	if err != nil {
 		return nil, fmt.Errorf("step 2 (S3 upload): %w", err)
 	}
 
 	// Step 3: Finalize the upload
-	result, err := c.finalizeUpload(owner, repo, policy)
+	result, err := c.finalizeUpload(owner, repo, policy, contentType)
 	if err != nil {
 		return nil, fmt.Errorf("step 3 (finalize): %w", err)
 	}
@@ -153,12 +159,19 @@ func (c *Client) requestPolicy(owner, repo, uploadToken string, repoID int, file
 	if policy.Asset.ID == 0 {
 		return nil, fmt.Errorf("policy response missing asset ID")
 	}
+	if policy.AssetUploadURL == "" {
+		return nil, fmt.Errorf("policy response missing asset_upload_url")
+	}
+	if !strings.HasPrefix(policy.AssetUploadURL, "/") {
+		return nil, fmt.Errorf("policy response asset_upload_url %q is not a root-relative path", policy.AssetUploadURL)
+	}
 
 	return &policy, nil
 }
 
-// finalizeUpload calls PUT /upload/assets/{id} to mark the asset as ready.
-func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse) (*Result, error) {
+// finalizeUpload PUTs to the policy's asset_upload_url to mark the asset as
+// ready, then builds the markdown reference based on the file's content type.
+func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse, contentType string) (*Result, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	if err := writer.WriteField("authenticity_token", policy.AssetUploadAuthenticityToken); err != nil {
@@ -166,7 +179,7 @@ func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse) (*Re
 	}
 	writer.Close()
 
-	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/upload/assets/%d", c.baseURL, policy.Asset.ID), body)
+	req, err := http.NewRequest("PUT", c.baseURL+policy.AssetUploadURL, body)
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +212,18 @@ func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse) (*Re
 	return &Result{
 		URL:      result.Href,
 		Name:     result.Name,
-		Markdown: fmt.Sprintf("![%s](%s)", result.Name, result.Href),
+		Markdown: renderMarkdown(result.Name, result.Href, contentType),
 	}, nil
+}
+
+// renderMarkdown returns the markdown GitHub itself emits on drag-and-drop:
+// an inline image embed (![]()) for images, and a plain download link ([]())
+// for every other attachment type (PDF, zip, docx, ...).
+func renderMarkdown(name, href, contentType string) string {
+	if strings.HasPrefix(contentType, "image/") {
+		return fmt.Sprintf("![%s](%s)", name, href)
+	}
+	return fmt.Sprintf("[%s](%s)", name, href)
 }
 
 func detectContentType(path string) string {

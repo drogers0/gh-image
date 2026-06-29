@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <em>Drop images into GitHub issues, PRs, and READMEs, straight from the command line.</em>
+  <em>Drop images and files into GitHub issues, PRs, and READMEs, straight from the command line.</em>
 </p>
 
 <p align="center">
@@ -17,11 +17,14 @@
 
 ---
 
-GitHub has no public API for image uploads. The web UI uses an internal endpoint that produces `user-attachments` URLs whose visibility is scoped to the repository they were uploaded to. `gh-image` replicates that flow as a `gh` CLI extension, so you can drop a screenshot into a bug report, README, or Slack thread without leaving the terminal — and images on private repos stay private.
+GitHub has no public API for the attachment uploads its web UI accepts via drag-and-drop. That internal endpoint produces `user-attachments` URLs whose visibility is scoped to the repository they were uploaded to. `gh-image` replicates that flow as a `gh` CLI extension, so you can drop a screenshot — or any GitHub-supported file like a PDF, zip, or log — into a bug report, README, or Slack thread without leaving the terminal, and uploads on private repos stay private. Images render as inline embeds; other files render as download links.
 
 ```console
 $ gh image screenshot.png
 ![screenshot.png](https://github.com/user-attachments/assets/88f4599a-…-bc24)
+
+$ gh image report.pdf
+[report.pdf](https://github.com/user-attachments/files/123456/report.pdf)
 ```
 
 ## Installation
@@ -52,21 +55,24 @@ Requires Go 1.26+.
 # Upload an image (infers repo from the current git workspace)
 gh image screenshot.png
 
-# Upload multiple images at once
+# Upload multiple files at once (images or anything GitHub accepts)
 gh image hero.png diagram.png chart.png
+
+# Upload any GitHub-supported file (PDF, zip, log, …) — renders as a download link
+gh image report.pdf
 
 # Target a specific repository
 gh image screenshot.png --repo owner/repo
 ```
 
-Each successful upload prints a ready-to-paste markdown reference on its own line:
+Each successful upload prints a ready-to-paste markdown reference on its own line — an inline embed for images, a download link for other files:
 
 ```
 ![hero.png](https://github.com/user-attachments/assets/…)
-![diagram.png](https://github.com/user-attachments/assets/…)
+[report.pdf](https://github.com/user-attachments/files/…/report.pdf)
 ```
 
-If any upload fails, the error is printed to stderr and the process exits non-zero — other images in the batch still upload.
+If any upload fails, the error is printed to stderr and the process exits non-zero — other files in the batch still upload.
 
 ### Pipe directly into an issue, PR, or comment
 
@@ -84,7 +90,7 @@ Happens consistently after the third click."
 
 ## Use with AI agents
 
-`gh-image` is packaged as an [agent skill](https://agentskills.io), so AI coding agents can upload and embed images for you — just ask in natural language, e.g. *"attach this screenshot to the PR"* or *"file an issue and add this image."*
+`gh-image` is packaged as an [agent skill](https://agentskills.io), so AI coding agents can upload and embed images or attach files for you — just ask in natural language, e.g. *"attach this screenshot to the PR"* or *"file an issue and attach this log."*
 
 ```bash
 npx skills add drogers0/gh-image
@@ -165,10 +171,10 @@ jobs:
 2. Fetches the target repository's page to obtain an `uploadToken` from the embedded JS payload.
 3. Requests an S3 upload policy from `/upload/policies/assets`.
 4. Uploads the file directly to S3 using the presigned form fields.
-5. Calls back to GitHub to finalize the asset.
-6. Prints `![name](url)` to stdout.
+5. Calls back to GitHub to finalize the asset, using the finalize endpoint GitHub returns in the policy (`/upload/assets/{id}` for images, `/upload/repository-files/{id}` for other files).
+6. Prints `![name](url)` for images, or `[name](url)` for other files, to stdout.
 
-The final URL is the standard `https://github.com/user-attachments/assets/<uuid>` format — visibility inherits from the target repository, so a private-repo upload requires authentication to view.
+The final URL is `https://github.com/user-attachments/assets/<uuid>` for images and `https://github.com/user-attachments/files/<id>/<name>` for other files — visibility inherits from the target repository, so a private-repo upload requires authentication to view.
 
 For the full architecture, see **[documentation/architecture.md](documentation/architecture.md)**. For the reverse-engineered upload protocol, see **[documentation/github-image-upload-flow.md](documentation/github-image-upload-flow.md)**.
 

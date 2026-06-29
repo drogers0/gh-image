@@ -2,7 +2,7 @@
 
 ## Overview
 
-`gh-image` is a Go CLI tool distributed as a `gh` extension. It uploads images to GitHub using the same internal API that the web UI uses when you drag-and-drop or paste an image. The tool resolves a GitHub session (from a flag, env var, or browser cookie store), negotiates upload tokens, performs an S3 presigned upload, then prints the resulting markdown image reference to stdout.
+`gh-image` is a Go CLI tool distributed as a `gh` extension. It uploads files — images and other GitHub-supported attachments like PDFs and zips — to GitHub using the same internal API that the web UI uses when you drag-and-drop or paste an attachment. The tool resolves a GitHub session (from a flag, env var, or browser cookie store), negotiates upload tokens, performs an S3 presigned upload, then prints the resulting markdown reference to stdout (an image embed for images, a download link for other files).
 
 ## Project Structure
 
@@ -43,12 +43,12 @@ gh-image/
 ## CLI Surface
 
 ```
-gh image [--repo owner/repo] [--token <value>] <image-path>...
+gh image [--repo owner/repo] [--token <value>] <file-path>...
 gh image extract-token
 gh image check-token [--token <value>]
 ```
 
-- **Default mode** uploads one or more image files and prints markdown references to stdout. Flags may appear before or after positional args; use `--` to pass filenames that begin with `-`.
+- **Default mode** uploads one or more files and prints markdown references to stdout. Flags may appear before or after positional args; use `--` to pass filenames that begin with `-`.
 - **`extract-token`** reads the session cookie from the browser and prints the raw token value to stdout (status info to stderr). Useful for piping into CI secrets.
 - **`check-token`** resolves a token using the standard precedence (flag → env → browser) and verifies it against GitHub, printing the authenticated username on success.
 
@@ -148,9 +148,9 @@ HTTP client plus a `baseURL` (production `https://github.com`); tests point
 // production base URL.
 func NewClient(sessionCookie *http.Cookie) *Client
 
-// Upload uploads an image file to GitHub and returns the asset URL,
+// Upload uploads a file to GitHub and returns the asset URL,
 // sanitized filename, and a ready-to-paste markdown reference.
-func (c *Client) Upload(owner, repo string, repoID int, imagePath string) (*Result, error)
+func (c *Client) Upload(owner, repo string, repoID int, path string) (*Result, error)
 ```
 
 #### Token Retrieval (`token.go`)
@@ -165,7 +165,7 @@ func (c *Client) getUploadToken(owner, repo string) (string, error)
 
 #### Upload Orchestration (`upload.go`)
 
-Coordinates the full flow for a single image:
+Coordinates the full flow for a single file:
 
 ```
 Get upload token
@@ -179,7 +179,9 @@ uploadToS3()           ──→  POST {s3_upload_url}
         │                    Multipart form with presigned fields + file
         │                    No GitHub auth needed
         ▼
-finalizeUpload()       ──→  PUT /upload/assets/{asset_id}
+finalizeUpload()       ──→  PUT {asset_upload_url}
+        │                    Path from policy: /upload/assets/{id} (images)
+        │                    or /upload/repository-files/{id} (other files)
         │                    Uses asset_upload_authenticity_token from step 1
         ▼
     Returns asset href URL
@@ -210,7 +212,7 @@ Responsibilities:
 - **Manual arg parsing** so that flags can appear before or after positional args, with `--` as an explicit terminator for filenames starting with a dash.
 - **Subcommand dispatch** for `extract-token` and `check-token`, with validation that disallowed flag combinations are rejected before any work is done.
 - **Session resolution** via `resolveSessionCookie`, which applies the flag → env → browser precedence and wraps raw token values into a properly scoped `*http.Cookie`.
-- **Multi-image upload loop**: each positional path is uploaded independently. A failure on one image is reported to stderr and the loop continues; the process exits non-zero if any upload failed.
+- **Multi-file upload loop**: each positional path is uploaded independently. A failure on one file is reported to stderr and the loop continues; the process exits non-zero if any upload failed.
 
 ## Data Flow
 
@@ -221,12 +223,12 @@ flowchart TD
 
     Start --> Session
 
-    subgraph PerImage ["For each image"]
+    subgraph PerImage ["For each file"]
         direction TB
         Token["<b>Fetch uploadToken</b><br/>GET /:owner/:repo"]
         Policy["<b>Request Policy</b><br/>POST /upload/policies/assets"]
         S3["<b>Upload to S3</b><br/>POST policy.upload_url<br/><i>(no GitHub auth)</i>"]
-        Finalize["<b>Finalize</b><br/>PUT /upload/assets/:id"]
+        Finalize["<b>Finalize</b><br/>PUT {asset_upload_url}"]
         Print["<b>Print markdown</b><br/>to stdout"]
 
         Token -- "uploadToken" --> Policy
@@ -296,4 +298,4 @@ git push --tags
 ## Future Considerations
 
 - **Clipboard image support:** Accept image data from clipboard (`gh image paste --repo o/r`) instead of requiring a file path.
-- **Token caching:** The `uploadToken` could be cached briefly to avoid fetching the repo page on every upload within a multi-image batch. The presigned S3 policy expires in ~30 minutes, so reuse is safe within that window.
+- **Token caching:** The `uploadToken` could be cached briefly to avoid fetching the repo page on every upload within a multi-file batch. The presigned S3 policy expires in ~30 minutes, so reuse is safe within that window.

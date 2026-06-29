@@ -2,9 +2,9 @@
 
 ## Overview
 
-GitHub does not provide a public API for uploading images to issues/PRs. The web UI uses an internal 3-step flow involving GitHub's servers and S3. This document describes exactly how that flow works, reverse-engineered from HAR captures.
+GitHub does not provide a public API for uploading attachments (images or files like PDFs and zips) to issues/PRs. The web UI uses an internal 3-step flow involving GitHub's servers and S3. This document describes exactly how that flow works, reverse-engineered from HAR captures. The flow is identical for images and other files; only the finalize path and the resulting URL/markdown differ (noted in Step 3 and Final Result).
 
-Images uploaded this way are scoped to the repository's visibility — private repo images require authentication to view (unlike GitHub Release assets, which are always public on public repos).
+Attachments uploaded this way are scoped to the repository's visibility — private repo uploads require authentication to view (unlike GitHub Release assets, which are always public on public repos).
 
 ## Prerequisites
 
@@ -92,7 +92,7 @@ This token serves as the `authenticity_token` for the upload policy request (Ste
 ```
 
 **Key fields in response:**
-- `asset.href` — The final URL where the image will be served
+- `asset.href` — The final URL where the attachment will be served
 - `asset.id` — Used in the finalize step
 - `form` — All fields needed for the S3 upload (presigned)
 - `upload_url` — The S3 endpoint to POST to
@@ -131,9 +131,12 @@ This token serves as the `authenticity_token` for the upload policy request (Ste
 
 ### Step 3: Finalize the Upload
 
-**Request:** `PUT https://github.com/upload/assets/{asset_id}`
+**Request:** `PUT https://github.com{asset_upload_url}`
 
-Where `{asset_id}` is `asset.id` from the Step 1 response.
+Where `asset_upload_url` is taken verbatim from the Step 1 response. GitHub routes the
+finalize to a different path per file type: `/upload/assets/{id}` for images and
+`/upload/repository-files/{id}` for other files (PDF, zip, …). Use the server-provided
+path rather than hardcoding one.
 
 **Content-Type:** `multipart/form-data`
 
@@ -163,14 +166,17 @@ Where `{asset_id}` is `asset.id` from the Step 1 response.
 
 ## Final Result
 
-The `href` value is the permanent image URL:
+The `href` value is the permanent attachment URL. Its shape depends on the file type:
 ```
-https://github.com/user-attachments/assets/{uuid}
+https://github.com/user-attachments/assets/{uuid}        # images
+https://github.com/user-attachments/files/{id}/{name}    # other files (PDF, zip, …)
 ```
 
-This can be embedded in any GitHub markdown (PR descriptions, issue bodies, comments) as:
+It can be referenced in any GitHub markdown (PR descriptions, issue bodies, comments). Images
+embed inline; other files render as a download link:
 ```markdown
 ![alt text](https://github.com/user-attachments/assets/{uuid})
+[report.pdf](https://github.com/user-attachments/files/{id}/report.pdf)
 ```
 
 ## Authentication Summary
@@ -197,7 +203,7 @@ POST /upload/policies/assets  (authenticity_token = uploadToken)
  └─> asset_upload_authenticity_token (in JSON response)
       │
       ▼
-PUT /upload/assets/{id}  (authenticity_token = asset_upload_authenticity_token)
+PUT {asset_upload_url}  (authenticity_token = asset_upload_authenticity_token)
 ```
 
 Each step produces the token needed for the next GitHub-authenticated step. The S3 upload (Step 2) uses a self-contained presigned policy and needs no GitHub tokens.
