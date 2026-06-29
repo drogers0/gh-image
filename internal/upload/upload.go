@@ -226,13 +226,30 @@ func renderMarkdown(name, href, contentType string) string {
 	return fmt.Sprintf("[%s](%s)", name, href)
 }
 
+// githubContentType overrides Go's mime table for extensions whose
+// GitHub-expected content type differs from what mime.TypeByExtension reports.
+// GitHub validates the content_type against the file extension and rejects the
+// policy request (422) on a mismatch; e.g. it requires text/x-log for .log,
+// where Go reports text/plain.
+var githubContentType = map[string]string{
+	".log": "text/x-log",
+}
+
 func detectContentType(path string) string {
-	ext := filepath.Ext(path)
-	ct := mime.TypeByExtension(ext)
-	if ct != "" {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ct, ok := githubContentType[ext]; ok {
 		return ct
 	}
-	return "application/octet-stream"
+	ct := mime.TypeByExtension(ext)
+	if ct == "" {
+		return "application/octet-stream"
+	}
+	// GitHub's content_type allowlist matches bare media types, so drop any
+	// parameters Go appends (e.g. "text/plain; charset=utf-8" -> "text/plain").
+	if mediaType, _, err := mime.ParseMediaType(ct); err == nil {
+		return mediaType
+	}
+	return ct
 }
 
 func truncate(s string, maxLen int) string {

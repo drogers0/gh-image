@@ -398,14 +398,25 @@ func TestDetectContentType(t *testing.T) {
 	// Make the test hermetic: minimal CI images may lack these in the mime registry.
 	_ = mime.AddExtensionType(".png", "image/png")
 	_ = mime.AddExtensionType(".pdf", "application/pdf")
-	if ct := detectContentType("a.png"); !strings.HasPrefix(ct, "image/png") {
-		t.Errorf("detectContentType(.png) = %q, want image/png prefix", ct)
+	// A text type carrying a charset parameter, to prove the parameter is stripped:
+	// GitHub's content_type allowlist rejects the parameterized form.
+	_ = mime.AddExtensionType(".txt", "text/plain; charset=utf-8")
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"a.png", "image/png"},
+		{"a.pdf", "application/pdf"},
+		{"notes.txt", "text/plain"},           // charset parameter stripped
+		{"server.log", "text/x-log"},          // GitHub override (Go reports text/plain)
+		{"SERVER.LOG", "text/x-log"},          // override is case-insensitive
+		{"a.zzz", "application/octet-stream"}, // unknown extension
 	}
-	if ct := detectContentType("a.pdf"); !strings.HasPrefix(ct, "application/pdf") {
-		t.Errorf("detectContentType(.pdf) = %q, want application/pdf prefix", ct)
-	}
-	if ct := detectContentType("a.zzz"); ct != "application/octet-stream" {
-		t.Errorf("detectContentType(.zzz) = %q, want application/octet-stream", ct)
+	for _, tc := range cases {
+		if got := detectContentType(tc.path); got != tc.want {
+			t.Errorf("detectContentType(%q) = %q, want %q", tc.path, got, tc.want)
+		}
 	}
 }
 
