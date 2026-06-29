@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/92463e67-b897-4212-91b4-a4f9b80ec4d4" alt="gh-image banner" width="640">
+  <img src="https://github.com/user-attachments/assets/d3455b90-f94f-4013-a00a-ebaff090635e" alt="gh-image banner" width="640">
 </p>
 
 <p align="center">
