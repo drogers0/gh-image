@@ -1,0 +1,13 @@
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Writes to stdout/stderr are not actionable: if the write itself fails
+      # there is no working channel left to report the failure, and the CLI is
+      # about to exit anyway. Errors from every other call are still checked.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln

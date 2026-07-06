@@ -66,7 +66,7 @@ func uploadToS3(policy *policyResponse, filePath, fileName, contentType string) 
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := io.Copy(part, f); err != nil {
 		return fmt.Errorf("writing file data: %w", err)
@@ -89,7 +89,7 @@ func uploadToS3(policy *policyResponse, filePath, fileName, contentType string) 
 	if err != nil {
 		return fmt.Errorf("S3 upload request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)

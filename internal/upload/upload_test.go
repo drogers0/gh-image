@@ -348,13 +348,13 @@ func TestUpload_Flow_NonImage(t *testing.T) {
 	})
 	mux.HandleFunc("/upload/policies/assets", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(fmt.Sprintf(`{
+		_, _ = fmt.Fprintf(w, `{
 			"upload_url": %q,
 			"asset": {"id": 99, "name": "report.pdf", "content_type": "application/pdf"},
 			"form": {"key": "k", "policy": "p"},
 			"asset_upload_url": "/upload/repository-files/99",
 			"asset_upload_authenticity_token": "AUTH"
-		}`, srv.URL+"/s3")))
+		}`, srv.URL+"/s3")
 	})
 	mux.HandleFunc("/s3", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

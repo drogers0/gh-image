@@ -118,7 +118,9 @@ func (c *Client) requestPolicy(owner, repo, uploadToken string, repoID int, file
 			return nil, fmt.Errorf("writing form field %s: %w", f.k, err)
 		}
 	}
-	writer.Close()
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("closing multipart writer: %w", err)
+	}
 
 	req, err := http.NewRequest("POST", c.baseURL+"/upload/policies/assets", body)
 	if err != nil {
@@ -135,7 +137,7 @@ func (c *Client) requestPolicy(owner, repo, uploadToken string, repoID int, file
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -187,7 +189,9 @@ func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse) (*Re
 	if err := writer.WriteField("authenticity_token", policy.AssetUploadAuthenticityToken); err != nil {
 		return nil, fmt.Errorf("writing form field authenticity_token: %w", err)
 	}
-	writer.Close()
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("closing multipart writer: %w", err)
+	}
 
 	req, err := http.NewRequest("PUT", c.baseURL+policy.AssetUploadURL, body)
 	if err != nil {
@@ -204,7 +208,7 @@ func (c *Client) finalizeUpload(owner, repo string, policy *policyResponse) (*Re
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)

@@ -52,7 +52,7 @@ func (c *Client) getUploadToken(owner, repo string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetching repo page: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("repo page returned %d — do you have access to %s/%s?", resp.StatusCode, owner, repo)
