@@ -58,7 +58,7 @@ func checkValidity(client *http.Client, targetURL string, sessionCookie *http.Co
 	if err != nil {
 		return "", fmt.Errorf("failed to validate token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusOK:

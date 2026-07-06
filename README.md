@@ -11,7 +11,7 @@
   <a href="https://github.com/drogers0/gh-image/stargazers"><img src="https://img.shields.io/github/stars/drogers0/gh-image?style=flat&color=yellow" alt="GitHub stars"></a>
   <a href="https://github.com/drogers0/gh-image/releases"><img src="https://img.shields.io/github/downloads/drogers0/gh-image/total?color=green" alt="Total downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/drogers0/gh-image?color=lightgrey" alt="License: MIT"></a>
-  <a href="https://goreportcard.com/report/github.com/drogers0/gh-image"><img src="https://goreportcard.com/badge/github.com/drogers0/gh-image" alt="Go Report Card"></a>
+  <a href="https://github.com/drogers0/gh-image/actions/workflows/lint.yml"><img src="https://github.com/drogers0/gh-image/actions/workflows/lint.yml/badge.svg" alt="Lint"></a>
   <a href="https://skills.sh/drogers0/gh-image"><img src="https://skills.sh/b/drogers0/gh-image" alt="skills.sh"></a>
 </p>
 
