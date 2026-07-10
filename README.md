@@ -103,7 +103,7 @@ The open [Agent Skills standard](https://agentskills.io/clients) is supported by
 
 `gh-image` authenticates with your existing GitHub session — **no tokens to provision, no OAuth scopes to configure** for everyday local use. The tool reads the `user_session` cookie from your browser's encrypted cookie store.
 
-**Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari
+**Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari · Vivaldi
 
 **Supported platforms:** macOS · Linux · Windows
 

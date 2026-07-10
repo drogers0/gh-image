@@ -47,7 +47,7 @@ Run these checks; only act on the ones that fail.
    - `--token <value>` flag, or
    - `GH_SESSION_TOKEN` env var (use this in CI / headless), or
    - the cookie store of a logged-in browser (Chrome/Brave/Chromium/Edge/Firefox/
-     Opera/Safari) — the default for local use. On macOS the first read may show a
+     Opera/Safari/Vivaldi) — the default for local use. On macOS the first read may show a
      Keychain prompt; the user should click **Always Allow**.
 
    > ⚠️ A `user_session` cookie grants **full account access** (it is not scoped

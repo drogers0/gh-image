@@ -1,7 +1,7 @@
+github.com/Spence1115/kooky v0.0.0-20260710172612-8a5ccf70f944 h1:5u+mEC1LKu7k0wfyg5Lix5BgGVXQ/swCxm3YvkHmuH8=
+github.com/Spence1115/kooky v0.0.0-20260710172612-8a5ccf70f944/go.mod h1:ndMF+xzEi4voUsZ4dX0BL45oompbf5wqBaKR+J3lUNk=
 github.com/browserutils/ese v0.0.0-20260314233042-37b6a03a93ce h1:xb/LXUukZgVLMRnTUyEiCfMNH7KUCFOS4aOZnc/N+H8=
 github.com/browserutils/ese v0.0.0-20260314233042-37b6a03a93ce/go.mod h1:Rj9TJxm7cExxJmdec83sr8cjvyF3raBsszTFviSo/6U=
-github.com/browserutils/kooky v0.2.10 h1:hEgbFJHf9lkMlSr0YdVEGtEo1yvqaTcGXNx0meNBgBA=
-github.com/browserutils/kooky v0.2.10/go.mod h1:ndMF+xzEi4voUsZ4dX0BL45oompbf5wqBaKR+J3lUNk=
 github.com/browserutils/sqlite3 v0.0.2 h1:RDSivmwoS5DauKYxh06G4Y+m6IX3da7Cq9Jh5x+oIUA=
 github.com/browserutils/sqlite3 v0.0.2/go.mod h1:3i7CY1ba3/D+qovGRJyCgfDnu/lGc8sg8ieM6jIUO50=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

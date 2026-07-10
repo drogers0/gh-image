@@ -15,6 +15,7 @@ import (
 	_ "github.com/browserutils/kooky/browser/firefox"
 	_ "github.com/browserutils/kooky/browser/opera"
 	_ "github.com/browserutils/kooky/browser/safari"
+	_ "github.com/browserutils/kooky/browser/vivaldi"
 )
 
 // NewSessionCookie builds a github.com user_session cookie from a raw value.
