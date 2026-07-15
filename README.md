@@ -111,16 +111,8 @@ On macOS, a Keychain prompt may appear on first use to authorize access to your 
 
 > [!NOTE]
 > **Windows + Chrome 127+:** Some versions of Chrome on Windows are not yet supported by the underlying cookie library. Use another browser or [investigate potential workarounds](https://github.com/drogers0/gh-image/issues/4).
-
-> [!NOTE]
-> **Android (Termux):** there is no desktop browser cookie store to read from, so automatic token extraction does not apply. Supply the session token explicitly — run `gh image extract-token` on a desktop machine where you are logged into GitHub, then on the phone:
 >
-> ```bash
-> export GH_SESSION_TOKEN='paste-token-here'
-> gh image screenshot.png
-> ```
->
-> Prefer `GH_SESSION_TOKEN` over `--token` on shared systems: flag values are visible in process listings.
+> **Android (Termux):** there is no browser cookie store to read from — supply the token explicitly via `GH_SESSION_TOKEN` (see [Session token override](#session-token-override) below).
 
 ### Session token override
 
