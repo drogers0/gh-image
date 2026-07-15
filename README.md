@@ -110,9 +110,7 @@ The open [Agent Skills standard](https://agentskills.io/clients) is supported by
 On macOS, a Keychain prompt may appear on first use to authorize access to your browser's cookie encryption key. Click **Always Allow** to skip future prompts.
 
 > [!NOTE]
-> **Windows + Chrome 127+:** Some versions of Chrome on Windows are not yet supported by the underlying cookie library. Use another browser or [investigate potential workarounds](https://github.com/drogers0/gh-image/issues/4).
->
-> **Android (Termux):** there is no browser cookie store to read from — supply the token explicitly via `GH_SESSION_TOKEN` (see [Session token override](#session-token-override) below).
+> **When browser cookies aren't available:** Chrome 127+ on Windows isn't yet supported by the underlying cookie library ([workarounds](https://github.com/drogers0/gh-image/issues/4)), and Android (Termux) has no browser cookie store at all. In either case, supply the token explicitly via `GH_SESSION_TOKEN` (see [Session token override](#session-token-override) below); on Windows you can also just use another browser.
 
 ### Session token override
 
