@@ -33,7 +33,7 @@ $ gh image report.pdf
 gh extension install drogers0/gh-image
 ```
 
-That's it. The [`gh` CLI](https://cli.github.com) auto-detects your platform and downloads the prebuilt binary. Pre-built releases ship for **macOS** (arm64, amd64), **Linux** (amd64, arm64), and **Windows** (amd64).
+That's it. The [`gh` CLI](https://cli.github.com) auto-detects your platform and downloads the prebuilt binary. Pre-built releases ship for **macOS** (arm64, amd64), **Linux** (amd64, arm64), **Windows** (amd64), and **Android/Termux** (arm64).
 
 <details>
 <summary>Build from source</summary>
@@ -105,12 +105,22 @@ The open [Agent Skills standard](https://agentskills.io/clients) is supported by
 
 **Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari
 
-**Supported platforms:** macOS · Linux · Windows
+**Supported platforms:** macOS · Linux · Windows · Android (Termux)
 
 On macOS, a Keychain prompt may appear on first use to authorize access to your browser's cookie encryption key. Click **Always Allow** to skip future prompts.
 
 > [!NOTE]
 > **Windows + Chrome 127+:** Some versions of Chrome on Windows are not yet supported by the underlying cookie library. Use another browser or [investigate potential workarounds](https://github.com/drogers0/gh-image/issues/4).
+
+> [!NOTE]
+> **Android (Termux):** there is no desktop browser cookie store to read from, so automatic token extraction does not apply. Supply the session token explicitly — run `gh image extract-token` on a desktop machine where you are logged into GitHub, then on the phone:
+>
+> ```bash
+> export GH_SESSION_TOKEN='paste-token-here'
+> gh image screenshot.png
+> ```
+>
+> Prefer `GH_SESSION_TOKEN` over `--token` on shared systems: flag values are visible in process listings.
 
 ### Session token override
 
