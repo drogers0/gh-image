@@ -11,12 +11,16 @@ builds:
       - darwin
       - linux
       - windows
+      - android
     goarch:
       - amd64
       - arm64
     ignore:
       - goos: windows
         goarch: arm64
+      # android/amd64 requires external (cgo) linking; we build with CGO_ENABLED=0.
+      - goos: android
+        goarch: amd64
 
 archives:
   - format: binary
