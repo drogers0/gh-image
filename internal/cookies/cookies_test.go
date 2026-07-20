@@ -158,6 +158,44 @@ func recordingValidator(dead ...string) (func(*http.Cookie) error, *[]string) {
 	}, &calls
 }
 
+func TestAnnotateReadError(t *testing.T) {
+	t.Run("ABE only", func(t *testing.T) {
+		err := annotateReadError(fmt.Errorf("cookie store: chrome: decryption failed"))
+		for _, want := range []string{"reading browser cookies", "decryption failed", "hint:", "GH_SESSION_TOKEN", "App-Bound Encryption"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("missing %q in %v", want, err)
+			}
+		}
+	})
+
+	t.Run("lock only", func(t *testing.T) {
+		err := annotateReadError(fmt.Errorf("cookie store: open: The process cannot access the file because it is being used by another process."))
+		for _, want := range []string{"Close the browser", "GH_SESSION_TOKEN"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("missing %q in %v", want, err)
+			}
+		}
+	})
+
+	t.Run("both present, lock hint first", func(t *testing.T) {
+		err := annotateReadError(fmt.Errorf("edge: being used by another process; chrome: decryption failed"))
+		msg := err.Error()
+		if got := strings.Count(msg, "hint:"); got != 2 {
+			t.Fatalf("expected 2 hints, got %d in %v", got, msg)
+		}
+		if strings.Index(msg, "Close the browser") > strings.Index(msg, "App-Bound Encryption") {
+			t.Errorf("expected lock hint before ABE hint, got %v", msg)
+		}
+	})
+
+	t.Run("no match leaves error untouched", func(t *testing.T) {
+		err := annotateReadError(fmt.Errorf("keyring locked"))
+		if got := err.Error(); got != "reading browser cookies: keyring locked" {
+			t.Errorf("expected bare wrap, got %q", got)
+		}
+	})
+}
+
 func TestChooseSession(t *testing.T) {
 	t.Run("empty raw with read error wraps it", func(t *testing.T) {
 		_, err := chooseSession(nil, fmt.Errorf("keyring locked"), nil)
@@ -166,10 +204,20 @@ func TestChooseSession(t *testing.T) {
 		}
 	})
 
+	t.Run("empty raw with ABE read error attaches hint", func(t *testing.T) {
+		_, err := chooseSession(nil, fmt.Errorf("cookie store: chrome: decryption failed"), nil)
+		if err == nil || !strings.Contains(err.Error(), "GH_SESSION_TOKEN") {
+			t.Fatalf("expected ABE hint mentioning GH_SESSION_TOKEN, got %v", err)
+		}
+	})
+
 	t.Run("empty raw without read error is the not-logged-in message", func(t *testing.T) {
 		_, err := chooseSession(nil, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "no github.com user_session cookie found") {
 			t.Fatalf("expected not-logged-in message, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "GH_SESSION_TOKEN") {
+			t.Errorf("expected not-logged-in message to mention GH_SESSION_TOKEN, got %v", err)
 		}
 	})
 

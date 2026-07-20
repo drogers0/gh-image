@@ -345,7 +345,7 @@ func resolveSessionCookieWithGetter(tokenFlag, envToken string, getBrowserCookie
 	}
 	cookie, err := getBrowserCookie()
 	if err != nil {
-		return nil, "", fmt.Errorf("no session token found (set --token flag or GH_SESSION_TOKEN env var, or log into GitHub in a supported browser): %w", err)
+		return nil, "", fmt.Errorf("resolving session cookie: %w", err)
 	}
 	return cookie, "browser cookies", nil
 }

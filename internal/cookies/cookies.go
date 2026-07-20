@@ -47,6 +47,61 @@ type sessionCandidate struct {
 	loggedIn bool // a logged_in=yes cookie exists in the SAME store
 }
 
+// noSessionMsg is shown when no user_session cookie was found in any browser and
+// there was no read error. Defined once — used by both empty-candidate paths.
+const noSessionMsg = "no github.com user_session cookie found in any supported " +
+	"browser — are you logged into GitHub? Set GH_SESSION_TOKEN to supply the " +
+	"cookie manually, or log into GitHub in Chrome, Chromium, Edge, Firefox, " +
+	"Brave, Opera, or Safari."
+
+// browserReadHints maps a substring that may appear in a browser-read error to
+// actionable guidance. Matching is by substring, not errors.Is: the triggering
+// strings originate outside our code and are not exported sentinels —
+//   - "decryption failed" is a bare errors.New from kooky, confirmed present in
+//     v0.2.10 (browserutils/kooky/internal/chrome/chrome.go). Re-verify on bump.
+//   - "being used by another process" is the Windows sharing-violation OS string,
+//     taken verbatim from the captured output in issue #5. NOTE: this text is
+//     locale-dependent — non-English Windows won't match, which degrades to no
+//     hint (never a wrong hint), consistent with the wrap-not-replace rule below.
+//
+// We append hints rather than replace the error, so an upstream/OS wording change
+// degrades to the raw error instead of a wrong message. See issues #4 and #5.
+var browserReadHints = []struct{ match, hint string }{
+	{
+		match: "being used by another process",
+		hint: "A running browser is locking its cookie database. Close the " +
+			"browser completely and try again, or set GH_SESSION_TOKEN to supply " +
+			"the cookie manually.",
+	},
+	{
+		match: "decryption failed",
+		hint: "A Chromium browser (Chrome 127+, Edge, Brave, or Opera) is blocking " +
+			"cookie decryption with App-Bound Encryption. Copy the github.com " +
+			"user_session cookie value from that browser's DevTools " +
+			"(F12 > Application > Cookies > github.com > user_session) and set " +
+			"GH_SESSION_TOKEN to it.",
+	},
+}
+
+// annotateReadError wraps a browser-read error as "reading browser cookies" and
+// appends any actionable hints whose trigger substring is present. Pure and
+// unit-testable; the wrapping matches the previous inline behavior when no hint
+// matches. Precondition: err is non-nil (callers only invoke it on a read error).
+func annotateReadError(err error) error {
+	wrapped := fmt.Errorf("reading browser cookies: %w", err)
+	var hints []string
+	msg := err.Error()
+	for _, h := range browserReadHints {
+		if strings.Contains(msg, h.match) {
+			hints = append(hints, h.hint)
+		}
+	}
+	if len(hints) == 0 {
+		return wrapped
+	}
+	return fmt.Errorf("%w\nhint: %s", wrapped, strings.Join(hints, "\nhint: "))
+}
+
 // readRawCookies reads every valid github.com cookie across all supported
 // browsers/profiles and reduces each to a rawCookie. It is the only part of
 // selection that touches the real browser stores, so it is kept thin; the
@@ -154,7 +209,7 @@ func filterLoggedIn(cands []sessionCandidate) []sessionCandidate {
 // surface the authoritative error.
 func selectSession(cands []sessionCandidate, validate func(*http.Cookie) error) (*http.Cookie, error) {
 	if len(cands) == 0 {
-		return nil, fmt.Errorf("no github.com user_session cookie found in any supported browser — are you logged into GitHub?")
+		return nil, fmt.Errorf("%s", noSessionMsg)
 	}
 
 	// filterLoggedIn allocates; the fallback copies — so we never sort the
@@ -192,9 +247,9 @@ func chooseSession(raw []rawCookie, readErr error, validate func(*http.Cookie) e
 		// kooky reports errors for absent browsers/profiles alongside cookies
 		// from present ones; only surface the read error if nothing usable came back.
 		if readErr != nil {
-			return nil, fmt.Errorf("reading browser cookies: %w", readErr)
+			return nil, annotateReadError(readErr)
 		}
-		return nil, fmt.Errorf("no github.com user_session cookie found in any supported browser — are you logged into GitHub?")
+		return nil, fmt.Errorf("%s", noSessionMsg)
 	}
 	return selectSession(cands, validate)
 }
