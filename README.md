@@ -130,10 +130,7 @@ gh image --token "$MY_TOKEN" screenshot.png --repo owner/repo
 GH_SESSION_TOKEN="$MY_TOKEN" gh image screenshot.png --repo owner/repo
 
 # Non-standard browser not auto-detected (Firefox forks like Floorp/LibreWolf)?
-# Firefox-family browsers store cookie values in plaintext — read it directly:
-GH_SESSION_TOKEN="$(sqlite3 ~/path/to/profile/cookies.sqlite \
-  "SELECT value FROM moz_cookies WHERE name='user_session' AND host LIKE '%github.com'")" \
-  gh image screenshot.png --repo owner/repo
+GH_SESSION_TOKEN="$(sqlite3 ~/path/to/profile/cookies.sqlite "SELECT value FROM moz_cookies WHERE name='user_session' AND host LIKE '%github.com'")" gh image screenshot.png --repo owner/repo
 ```
 
 > [!WARNING]
