@@ -130,8 +130,8 @@ func TestResolveSessionCookie_BrowserFallbackError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when browser getter fails, got nil")
 	}
-	if !strings.Contains(err.Error(), "no session token found") {
-		t.Errorf("expected 'no session token found' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "resolving session cookie") {
+		t.Errorf("expected 'resolving session cookie' in error, got: %v", err)
 	}
 }
 
