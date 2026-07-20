@@ -411,9 +411,23 @@ func TestDetectContentType(t *testing.T) {
 	}{
 		{"a.png", "image/png"},
 		{"a.pdf", "application/pdf"},
-		{"notes.txt", "text/plain"},           // charset parameter stripped
-		{"server.log", "text/x-log"},          // GitHub override (Go reports text/plain)
-		{"SERVER.LOG", "text/x-log"},          // override is case-insensitive
+		{"notes.txt", "text/plain"},  // charset parameter stripped
+		{"server.log", "text/x-log"}, // GitHub override (Go reports text/plain)
+		{"SERVER.LOG", "text/x-log"}, // override is case-insensitive
+		// GitHub overrides, each verified accepted against the policy endpoint.
+		// Go would otherwise send a rejected type (or, for the empty-mapping
+		// extensions, application/octet-stream), causing a 422.
+		{"photo.jpg", "image/jpeg"},           // Windows: image/pjpeg / image/jpg
+		{"PHOTO.JPEG", "image/jpeg"},          // case-insensitive
+		{"app.js", "text/javascript"},         // Windows: text/plain
+		{"main.ts", "text/typescript"},        // Go: video/mp2t (all OSes)
+		{"app.tsx", "text/tsx"},               // Go: no mapping
+		{"README.md", "text/markdown"},        // Go: no mapping
+		{"script.py", "text/x-python"},        // Go: no mapping
+		{"config.yaml", "application/x-yaml"}, // Go: no mapping
+		{"config.yml", "application/x-yaml"},  // Go: no mapping
+		{"sound.wav", "audio/wav"},            // Go: audio/x-wav
+		{"lib.cpp", "text/x-c++"},             // Go: text/x-c
 		{"a.zzz", "application/octet-stream"}, // unknown extension
 	}
 	for _, tc := range cases {

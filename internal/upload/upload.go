@@ -251,10 +251,42 @@ func renderMarkdown(name, href, contentType string) string {
 // githubContentType overrides Go's mime table for extensions whose
 // GitHub-expected content type differs from what mime.TypeByExtension reports.
 // GitHub validates the content_type against the file extension and rejects the
-// policy request (422) on a mismatch; e.g. it requires text/x-log for .log,
-// where Go reports text/plain.
+// policy request (422) on a mismatch.
+//
+// mime.TypeByExtension is unreliable here for two reasons: on Windows it reads
+// the registry, which can return legacy types (.jpg -> image/pjpeg); and for
+// many code/data extensions it returns nothing on every OS, so detectContentType
+// falls back to application/octet-stream, which GitHub rejects for text types.
+// Each value below was verified accepted (HTTP 201) against GitHub's policy
+// endpoint; the alternatives Go would otherwise send were verified rejected (422).
 var githubContentType = map[string]string{
+	// Windows registry emits legacy image/pjpeg or image/jpg for JPEG.
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	// Windows registry emits text/plain; GitHub also rejects application/javascript.
+	".js": "text/javascript",
+	// Go returns audio/x-wav / text/x-c, both rejected.
+	".wav": "audio/wav",
+	".cpp": "text/x-c++",
+	// Go returns video/mp2t for .ts (the MPEG-TS collision) on every OS.
+	".ts":  "text/typescript",
+	".tsx": "text/tsx",
+	// Go reports these but GitHub wants a different type.
 	".log": "text/x-log",
+	".sql": "application/sql",
+	".pdb": "application/octet-stream",
+	// Go has no mapping for these, so it falls back to application/octet-stream.
+	".md":         "text/markdown",
+	".jsonc":      "application/json",
+	".cs":         "text/x-csharp",
+	".php":        "text/x-php",
+	".py":         "text/x-python",
+	".patch":      "text/x-patch",
+	".cpuprofile": "application/json",
+	".ipynb":      "application/x-ipynb+json",
+	".yaml":       "application/x-yaml",
+	".yml":        "application/x-yaml",
+	".tgz":        "application/gzip",
 }
 
 func detectContentType(path string) string {
