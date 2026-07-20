@@ -71,8 +71,7 @@ var browserReadHints = []struct{ match, hint string }{
 		match: "being used by another process",
 		hint: "A running browser is locking its cookie database. Close the " +
 			"browser completely and try again, or set GH_SESSION_TOKEN to supply " +
-			"the cookie manually. " +
-			"See https://github.com/drogers0/gh-image/issues/5",
+			"the cookie manually.",
 	},
 	{
 		match: "decryption failed",
@@ -80,8 +79,7 @@ var browserReadHints = []struct{ match, hint string }{
 			"cookie decryption with App-Bound Encryption. Copy the github.com " +
 			"user_session cookie value from that browser's DevTools " +
 			"(F12 > Application > Cookies > github.com > user_session) and set " +
-			"GH_SESSION_TOKEN to it. " +
-			"See https://github.com/drogers0/gh-image/issues/4",
+			"GH_SESSION_TOKEN to it.",
 	},
 }
 

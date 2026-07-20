@@ -161,7 +161,7 @@ func recordingValidator(dead ...string) (func(*http.Cookie) error, *[]string) {
 func TestAnnotateReadError(t *testing.T) {
 	t.Run("ABE only", func(t *testing.T) {
 		err := annotateReadError(fmt.Errorf("cookie store: chrome: decryption failed"))
-		for _, want := range []string{"reading browser cookies", "decryption failed", "hint:", "GH_SESSION_TOKEN", "issues/4"} {
+		for _, want := range []string{"reading browser cookies", "decryption failed", "hint:", "GH_SESSION_TOKEN", "App-Bound Encryption"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("missing %q in %v", want, err)
 			}
@@ -170,7 +170,7 @@ func TestAnnotateReadError(t *testing.T) {
 
 	t.Run("lock only", func(t *testing.T) {
 		err := annotateReadError(fmt.Errorf("cookie store: open: The process cannot access the file because it is being used by another process."))
-		for _, want := range []string{"Close the browser", "issues/5"} {
+		for _, want := range []string{"Close the browser", "GH_SESSION_TOKEN"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("missing %q in %v", want, err)
 			}
