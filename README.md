@@ -119,7 +119,7 @@ For CI, headless environments, or shared machines, you can supply the session to
 | Priority | Source | When to use |
 |---|---|---|
 | 1 | `--token <value>` flag | One-off invocations |
-| 2 | `GH_SESSION_TOKEN` env var | CI/CD, shared machines |
+| 2 | `GH_SESSION_TOKEN` env var | CI/CD, shared machines, non-standard browsers |
 | 3 | Browser cookie store | Local interactive use (default) |
 
 ```bash
@@ -128,6 +128,10 @@ gh image --token "$MY_TOKEN" screenshot.png --repo owner/repo
 
 # Environment variable (preferred — not visible to `ps aux`)
 GH_SESSION_TOKEN="$MY_TOKEN" gh image screenshot.png --repo owner/repo
+
+# Non-standard browser not auto-detected (Firefox forks like Floorp/LibreWolf)?
+GH_SESSION_TOKEN="$(sqlite3 ~/path/to/profile/cookies.sqlite "SELECT value FROM moz_cookies WHERE name='user_session' AND host LIKE '%github.com'")" \
+  gh image screenshot.png --repo owner/repo
 ```
 
 > [!WARNING]
