@@ -130,6 +130,14 @@ gh image --token "$MY_TOKEN" screenshot.png --repo owner/repo
 GH_SESSION_TOKEN="$MY_TOKEN" gh image screenshot.png --repo owner/repo
 ```
 
+**Non-standard browser profiles** (Firefox forks like Floorp/LibreWolf, or a profile in an unusual path) may not be auto-detected. Firefox-family browsers store cookie values in plaintext, so read the token straight from the profile:
+
+```bash
+GH_SESSION_TOKEN="$(sqlite3 ~/path/to/profile/cookies.sqlite \
+  "SELECT value FROM moz_cookies WHERE name='user_session' AND host LIKE '%github.com'")" \
+  gh image screenshot.png --repo owner/repo
+```
+
 > [!WARNING]
 > `user_session` cookies grant **full account access** — they are not scoped like personal access tokens. Treat them with the same care as a password. If leaked, **[sign out of GitHub](https://github.com/logout)** on the machine that holds the session; if you are not on that machine, revoke it through [Settings → Sessions](https://github.com/settings/sessions), or [change your password](https://github.com/settings/security) (which kills every session in one action).
 
