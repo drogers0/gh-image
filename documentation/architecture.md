@@ -74,7 +74,7 @@ Reads the GitHub `user_session` cookie from local browser cookie stores.
 - AES decryption and cookie DB schema differences across versions
 - Per-browser quirks for Chromium-family browsers, Firefox, Safari, and Opera
 
-**Supported browsers** (registered via blank-imported kooky finders): Chrome, Brave, Edge, Chromium, Firefox, Opera, Safari. `GetGitHubSession` queries all of them in one pass, groups the `user_session` candidates per browser store, and prefers stores that are logged in. When more than one candidate survives, `validate` is used to pick a live one (pass nil to skip network validation).
+**Supported browsers** (registered via blank-imported kooky finders): Chrome, Brave, Edge, Chromium, Firefox, Opera, Safari, Vivaldi. `GetGitHubSession` queries all of them in one pass, groups the `user_session` candidates per browser store, and prefers stores that are logged in. When more than one candidate survives, `validate` is used to pick a live one (pass nil to skip network validation).
 
 ```go
 // GetGitHubSession returns the best user_session cookie for github.com across

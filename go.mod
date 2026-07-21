@@ -18,3 +18,8 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/ini.v1 v1.67.1 // indirect
 )
+
+// Temporary: Vivaldi support lives on a kooky fork until it is merged and
+// released upstream. Once released, bump the require above to that version and
+// delete this replace. Tracks browserutils/kooky#114.
+replace github.com/browserutils/kooky => github.com/Spence1115/kooky v0.0.0-20260710172612-8a5ccf70f944
