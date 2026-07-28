@@ -81,6 +81,23 @@ var browserReadHints = []struct{ match, hint string }{
 			"(F12 > Application > Cookies > github.com > user_session) and set " +
 			"GH_SESSION_TOKEN to it.",
 	},
+	{
+		// Surface keyring failures (libsecret / KWallet) with actionable recovery.
+		// Match is substring-based: kooky wraps these as
+		// "keyring password retrieval failed: …" (browserutils/kooky).
+		match: "keyring password retrieval failed",
+		hint: "Could not read the browser's cookie encryption key from the OS " +
+			"keyring. On Linux, ensure you are logged into GitHub in Chrome and " +
+			"that gnome-keyring (or KWallet on KDE) is unlocked. Confirm with: " +
+			"secret-tool lookup xdg:schema chrome_libsecret_os_crypt_password_v2. " +
+			"As a temporary override only, set GH_SESSION_TOKEN from DevTools.",
+	},
+	{
+		match: "secret not found in keyring",
+		hint: "The Chrome Safe Storage secret was not found in the OS keyring. " +
+			"Log into Chrome so it creates \"Chrome Safe Storage\", unlock the " +
+			"keyring, and retry. Temporary override: GH_SESSION_TOKEN from DevTools.",
+	},
 }
 
 // annotateReadError wraps a browser-read error as "reading browser cookies" and

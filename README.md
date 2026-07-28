@@ -109,6 +109,8 @@ The open [Agent Skills standard](https://agentskills.io/clients) is supported by
 
 On macOS, a Keychain prompt may appear on first use to authorize access to your browser's cookie encryption key. Click **Always Allow** to skip future prompts.
 
+On Linux, Chrome cookie decryption needs the OS keyring (gnome-keyring / libsecret, or KWallet on KDE) unlocked so the library can read **Chrome Safe Storage**. Prefer that native path for interactive use; do not inject `user_session` / `GH_SESSION_TOKEN` into unattended agent environments.
+
 > [!NOTE]
 > **When browser cookies aren't available:** Chrome 127+ on Windows isn't yet supported by the underlying cookie library ([workarounds](https://github.com/drogers0/gh-image/issues/4)), and Android (Termux) has no browser cookie store at all. In either case, supply the token explicitly via `GH_SESSION_TOKEN` (see [Session token override](#session-token-override) below); on Windows you can also just use another browser.
 

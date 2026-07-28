@@ -194,6 +194,24 @@ func TestAnnotateReadError(t *testing.T) {
 			t.Errorf("expected bare wrap, got %q", got)
 		}
 	})
+
+	t.Run("keyring retrieval failure gets hint", func(t *testing.T) {
+		err := annotateReadError(fmt.Errorf("decrypting cookie: keyring password retrieval failed: kwallet: password not found"))
+		for _, want := range []string{"reading browser cookies", "keyring password retrieval failed", "hint:", "secret-tool", "GH_SESSION_TOKEN"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("missing %q in %v", want, err)
+			}
+		}
+	})
+
+	t.Run("secret not found in keyring gets hint", func(t *testing.T) {
+		err := annotateReadError(fmt.Errorf("keyring password retrieval failed: secret not found in keyring for application \"chrome\""))
+		for _, want := range []string{"hint:", "Chrome Safe Storage", "GH_SESSION_TOKEN"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("missing %q in %v", want, err)
+			}
+		}
+	})
 }
 
 func TestChooseSession(t *testing.T) {
