@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -19,10 +20,7 @@ func okDeps() deps {
 		resolveRepo: func(owner, name string) (*repo.Info, error) {
 			return &repo.Info{Owner: "octo", Name: "hello", ID: 1}, nil
 		},
-		resolveCookie: func(tokenFlag string) (*http.Cookie, error) {
-			return &http.Cookie{Name: "user_session", Value: "tok"}, nil
-		},
-		newUploader: func(cookie *http.Cookie) uploadFunc {
+		newUploader: func(tokenFlag string, stderr io.Writer) uploadFunc {
 			// The stub returns image-embed markdown for any path; run()'s job is the
 			// orchestration spine, not the embed-vs-link decision (that lives in
 			// upload.renderMarkdown and is covered by TestRenderMarkdown).
@@ -394,7 +392,7 @@ func TestRun_Upload(t *testing.T) {
 	})
 	t.Run("partial failure exits 1 but prints successes", func(t *testing.T) {
 		d := okDeps()
-		d.newUploader = func(c *http.Cookie) uploadFunc {
+		d.newUploader = func(string, io.Writer) uploadFunc {
 			return func(info *repo.Info, p string) (string, error) {
 				if p == "bad.png" {
 					return "", fmt.Errorf("upload failed")
@@ -421,12 +419,41 @@ func TestRun_Upload(t *testing.T) {
 			t.Fatalf("code=%d stderr=%q", code, errOut)
 		}
 	})
-	t.Run("resolveCookie error exits 1", func(t *testing.T) {
+	// Session resolution is now lazy, so a missing session surfaces per file
+	// through the upload path rather than as a pre-flight error.
+	t.Run("session resolution failure exits 1", func(t *testing.T) {
 		d := okDeps()
-		d.resolveCookie = func(string) (*http.Cookie, error) { return nil, fmt.Errorf("no token") }
+		d.newUploader = func(string, io.Writer) uploadFunc {
+			return func(*repo.Info, string) (string, error) { return "", fmt.Errorf("no token") }
+		}
 		code, _, errOut := runWith(t, []string{"a.png"}, d)
-		if code != 1 || !strings.Contains(errOut, "Error:") {
+		if code != 1 || !strings.Contains(errOut, "Error uploading a.png: no token") {
 			t.Fatalf("code=%d stderr=%q", code, errOut)
+		}
+	})
+	t.Run("fallback notice goes to stderr only, once per run", func(t *testing.T) {
+		d := okDeps()
+		d.newUploader = func(tokenFlag string, stderr io.Writer) uploadFunc {
+			notified := false
+			return func(info *repo.Info, p string) (string, error) {
+				if !notified {
+					notified = true
+					fmt.Fprintln(stderr, "Note: fast upload unavailable (HTTP 404); using browser session.")
+				}
+				return "![" + p + "](url)", nil
+			}
+		}
+		code, out, errOut := runWith(t, []string{"a.png", "b.png"}, d)
+		if code != 0 {
+			t.Fatalf("code = %d, want 0", code)
+		}
+		// stdout is piped straight into `gh issue comment`, so it must carry
+		// markdown and nothing else.
+		if strings.Contains(out, "Note:") {
+			t.Errorf("notice leaked into stdout: %q", out)
+		}
+		if n := strings.Count(errOut, "Note: fast upload unavailable"); n != 1 {
+			t.Errorf("notice printed %d times, want 1: %q", n, errOut)
 		}
 	})
 	t.Run("explicit --repo is parsed and passed to resolveRepo", func(t *testing.T) {
@@ -492,9 +519,32 @@ func TestResolveSessionCookie_NilGetter(t *testing.T) {
 	}
 }
 
+// TestUseBearerRoute covers the rule that keeps an explicitly named account
+// from being silently overridden by the gh identity.
+func TestUseBearerRoute(t *testing.T) {
+	tests := []struct {
+		name      string
+		tokenFlag string
+		envToken  string
+		want      bool
+	}{
+		{"no session token supplied", "", "", true},
+		{"--token flag pins the session flow", "tok", "", false},
+		{"GH_SESSION_TOKEN pins the session flow", "", "envtok", false},
+		{"both supplied", "tok", "envtok", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := useBearerRoute(tc.tokenFlag, tc.envToken); got != tc.want {
+				t.Errorf("useBearerRoute(%q, %q) = %v, want %v", tc.tokenFlag, tc.envToken, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestProductionDeps_WiringComplete(t *testing.T) {
 	d := productionDeps()
-	if d.resolveRepo == nil || d.resolveCookie == nil || d.newUploader == nil || d.extractToken == nil || d.checkToken == nil {
+	if d.resolveRepo == nil || d.newUploader == nil || d.extractToken == nil || d.checkToken == nil {
 		t.Fatal("productionDeps left a boundary unwired")
 	}
 }

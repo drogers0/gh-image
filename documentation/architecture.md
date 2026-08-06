@@ -137,7 +137,9 @@ func Resolve(owner, name string) (*Info, error)
 
 ### 6. Upload Flow (`internal/upload/`)
 
-Implements the 3-step upload protocol documented in [github-image-upload-flow.md](github-image-upload-flow.md). All GitHub-bound requests use a shared `http.Client` whose cookie jar is built by `cookies.NewGitHubCookieJar`, so `_gh_sess` rotation is handled automatically.
+Two routes sit behind a `Router` (`route.go`). It first tries `BearerClient` (`bearer.go`), a single authenticated request to `uploads.github.com` using the `gh` CLI token, and falls back to the browser-session `Client` for anything the bearer route refuses. Nothing about GitHub's constraints is encoded in the router — it attempts the fast path and lets the server's answer decide — but it remembers each *durable* rejection for the rest of the run, keyed by content type for a `422` and run-wide for a `400`/`401`/`403`/`404`. Transient failures are retried on the next file. The session cookie is resolved lazily, on the first file that actually needs the fallback.
+
+The browser-session `Client` implements the 3-step upload protocol documented in [github-image-upload-flow.md](github-image-upload-flow.md). All its GitHub-bound requests use a shared `http.Client` whose cookie jar is built by `cookies.NewGitHubCookieJar`, so `_gh_sess` rotation is handled automatically.
 
 All GitHub requests are issued through a `*Client` that carries the cookie-jar
 HTTP client plus a `baseURL` (production `https://github.com`); tests point

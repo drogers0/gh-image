@@ -151,7 +151,7 @@ A <code>demo-videos</code> skill publishes the <b>README demo reels</b> &mdash; 
 
 ## Authentication
 
-`gh-image` authenticates with your existing GitHub session — **no tokens to provision, no OAuth scopes to configure** for everyday local use. The tool reads the `user_session` cookie from your browser's encrypted cookie store.
+`gh-image` authenticates with credentials you already have — **nothing to provision, no OAuth scopes to configure**. Images and video going to a repository you can push to are uploaded with your `gh` CLI token; everything else — other file types, and repositories you cannot push to — falls back to your existing GitHub session, read as the `user_session` cookie from your browser's encrypted cookie store.
 
 **Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari
 
@@ -222,7 +222,7 @@ jobs:
 
 ## How it works
 
-1. Resolves a `user_session` cookie from the configured source (flag → env → browser).
+1. Tries a single authenticated upload with the `gh` CLI token; on failure falls back to the browser-session flow below, resolving a `user_session` cookie from the configured source (flag → env → browser).
 2. Fetches the target repository's page to obtain an `uploadToken` from the embedded JS payload.
 3. Requests an S3 upload policy from `/upload/policies/assets`.
 4. Uploads the file directly to S3 using the presigned form fields.
@@ -245,6 +245,7 @@ For the full architecture, see **[documentation/architecture.md](documentation/a
 - Uses an **undocumented** internal GitHub API that may change without notice.
 - `uploadToken` is usually present on repository pages for any user who can view the repo. An invalid or expired session is the case where it is absent.
 - Session cookies are not scoped credentials; they expire when GitHub invalidates the session.
+- Uploads are attributed to the account that authenticated them, so if your browser session and your `gh` login are different accounts, images and video may be attributed differently from other files. Supply a session token explicitly to pin every upload to one account.
 
 ## Contributing
 
