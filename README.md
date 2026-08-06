@@ -107,7 +107,7 @@ Shipping visual evidence in production review pipelines:
 <tr>
 <td valign="top">
 
-<a href="https://github.com/NousResearch/hermes-agent"><img src="https://avatars.githubusercontent.com/u/134168893?s=48&v=4" width="18" align="top"></a> &nbsp;<b><a href="https://github.com/NousResearch/hermes-agent/blob/main/.github/workflows/publish-e2e-evidence.yml">NousResearch/hermes-agent</a></b> &nbsp;<code>&#9733; 220k+</code>
+<a href="https://github.com/NousResearch/hermes-agent"><img src="https://avatars.githubusercontent.com/u/134168893?s=48&v=4" width="18" align="top"></a> &nbsp;<b><a href="https://github.com/NousResearch/hermes-agent/blob/main/.github/workflows/publish-e2e-evidence.yml">NousResearch/hermes-agent</a></b> &nbsp;<code>&#9733; 226k+</code>
 <br><br>
 Automated <b>visual proof on every single pull request</b>, with no human in the loop: the <a href="https://github.com/NousResearch/hermes-agent/blob/main/.github/workflows/publish-e2e-evidence.yml">publish job</a> uploads the E2E screenshots inline using a specially scoped attachment bot account.
 
@@ -128,7 +128,7 @@ Its <code>/qa-verify</code> agent skill hands reviewers <b>full-resolution QA ev
 <td width="50%" valign="top">
 
 <a href="https://github.com/Simpleyyt/ai-manus"><img src="https://avatars.githubusercontent.com/u/2818827?s=48&v=4" width="18" align="top"></a> &nbsp;<b><a href="https://github.com/Simpleyyt/ai-manus/blob/main/.cursor/skills/demo-videos/SKILL.md">Simpleyyt/ai-manus</a></b><br>
-<code>&#9733; 1.5k+</code>
+<code>&#9733; 1.6k+</code>
 <br><br>
 A <code>demo-videos</code> skill publishes the <b>README demo reels</b> &mdash; <code>gh image</code> is mandatory, since only <code>user-attachments</code> URLs autoplay inline.
 
