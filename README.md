@@ -36,6 +36,19 @@ gh extension install drogers0/gh-image
 That's it. The [`gh` CLI](https://cli.github.com) auto-detects your platform and downloads the prebuilt binary. Pre-built releases ship for **macOS** (arm64, amd64), **Linux** (amd64, arm64), **Windows** (amd64), and **Android/Termux** (arm64).
 
 <details>
+<summary>Verify build provenance</summary>
+
+Release binaries are signed with [build provenance attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations), which prove a binary was built by this repository's release workflow from a specific commit. To check one before installing, download it from the [releases page](https://github.com/drogers0/gh-image/releases) and run:
+
+```bash
+gh attestation verify darwin-arm64 --owner drogers0
+```
+
+Note that `gh extension install` does not verify attestations itself — this is an explicit check for anyone who wants it.
+
+</details>
+
+<details>
 <summary>Build from source</summary>
 
 ```bash
@@ -97,7 +110,7 @@ Happens consistently after the third click."
 npx skills add drogers0/gh-image
 ```
 
-The open [Agent Skills standard](https://agentskills.io/clients) is supported by **Claude Code**, **OpenAI Codex**, **Cursor**, **GitHub Copilot**, and [many more](https://agentskills.io/clients). The skill walks the agent through installing this extension (if needed), running the upload, and embedding the resulting `user-attachments` URL into a PR, issue, or comment.
+The open [Agent Skills standard](https://agentskills.io/clients) is supported by **Claude Code**, **OpenAI Codex**, **Cursor**, **GitHub Copilot**, and [many more](https://agentskills.io/clients). The skill checks that this extension is present (asking you to install it if not), runs the upload, and embeds the resulting `user-attachments` URL into a PR, issue, or comment. It never installs anything on your behalf.
 
 ## Who's using gh-image
 
