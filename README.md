@@ -99,6 +99,43 @@ npx skills add drogers0/gh-image
 
 The open [Agent Skills standard](https://agentskills.io/clients) is supported by **Claude Code**, **OpenAI Codex**, **Cursor**, **GitHub Copilot**, and [many more](https://agentskills.io/clients). The skill walks the agent through installing this extension (if needed), running the upload, and embedding the resulting `user-attachments` URL into a PR, issue, or comment.
 
+## Who's using gh-image
+
+Shipping visual evidence in production review pipelines:
+
+<table width="100%">
+<tr>
+<td valign="top">
+
+<a href="https://github.com/NousResearch/hermes-agent"><img src="https://avatars.githubusercontent.com/u/134168893?s=48&v=4" width="18" align="top"></a> &nbsp;<b><a href="https://github.com/NousResearch/hermes-agent/blob/main/.github/workflows/publish-e2e-evidence.yml">NousResearch/hermes-agent</a></b> &nbsp;<code>&#9733; 226k+</code>
+<br><br>
+Automated <b>visual proof on every single pull request</b>, with no human in the loop: the <a href="https://github.com/NousResearch/hermes-agent/blob/main/.github/workflows/publish-e2e-evidence.yml">publish job</a> uploads the E2E screenshots inline using a specially scoped attachment bot account.
+
+</td>
+</tr>
+</table>
+
+<table width="100%">
+<tr>
+<td width="50%" valign="top">
+
+<a href="https://github.com/openshift/console"><img src="https://avatars.githubusercontent.com/u/792337?s=48&v=4" width="18" align="top"></a> &nbsp;<b><a href="https://github.com/openshift/console/blob/main/.claude/skills/qa-verify/scripts/upload-evidence.sh">openshift/console</a></b><br>
+<code>&#9733; 450+</code> &nbsp;&middot;&nbsp; Red Hat
+<br><br>
+Its <code>/qa-verify</code> agent skill hands reviewers <b>full-resolution QA evidence</b> &mdash; CDN-hosted, so nothing gets downscaled to fit a comment.
+
+</td>
+<td width="50%" valign="top">
+
+<a href="https://github.com/Simpleyyt/ai-manus"><img src="https://avatars.githubusercontent.com/u/2818827?s=48&v=4" width="18" align="top"></a> &nbsp;<b><a href="https://github.com/Simpleyyt/ai-manus/blob/main/.cursor/skills/demo-videos/SKILL.md">Simpleyyt/ai-manus</a></b><br>
+<code>&#9733; 1.6k+</code>
+<br><br>
+A <code>demo-videos</code> skill publishes the <b>README demo reels</b> &mdash; <code>gh image</code> is mandatory, since only <code>user-attachments</code> URLs autoplay inline.
+
+</td>
+</tr>
+</table>
+
 ## Authentication
 
 `gh-image` authenticates with your existing GitHub session — **no tokens to provision, no OAuth scopes to configure** for everyday local use. The tool reads the `user_session` cookie from your browser's encrypted cookie store.
