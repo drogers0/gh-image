@@ -32,7 +32,7 @@ The [agent skill](skills/github-image-upload/SKILL.md) is scanned by third-party
 
 | Finding | Why it stands |
 |---|---|
-| `DATA_EXFILTRATION` | Uploading local files to GitHub is what the tool does. It is mitigated — the skill confirms the destination repo before uploading and stops rather than guessing an ambiguous path — but not removable without removing the tool. |
+| `DATA_EXFILTRATION` | Uploading local files to GitHub is what the tool does. It is mitigated — the skill states the destination repo before uploading, waits for confirmation where there is someone to give it, and stops rather than guessing an ambiguous path — but not removable without removing the tool. |
 | `CREDENTIALS_UNSAFE` | GitHub supports exactly one credential here (above), and it is unscoped. What is left is where it lives. Browser cookie store (local default) leaves it in the OS keychain it already occupies — no new copy. `GH_SESSION_TOKEN` (recommended for CI and shared machines) keeps it out of `ps aux` and shell history. The `--token` flag is visible in `ps aux`; the skill tells agents not to use it. Both defaults are reasonable placements, but the credential's blast radius is GitHub's to fix, not ours. |
 | `PROMPT_INJECTION` (residual) | Appending to a PR *description* requires reading the existing body. The documented command keeps it in the shell pipeline, but anyone who decomposes that command — or reads a body for any other reason — puts attacker-controlled text in front of the agent. Eliminating the round-trip would mean moving read-modify-write into `gh-image`, making it a tool that mutates GitHub objects rather than one that prints a URL. Not a trade we are making. The comment path, which never reads a body, is documented as the preferred default. |
 
