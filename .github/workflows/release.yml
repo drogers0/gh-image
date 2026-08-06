@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write      # OIDC identity for provenance signing
+  attestations: write
 
 jobs:
   release:
@@ -29,3 +31,14 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Binds each released binary to this repo, workflow, and commit, so users can
+      # run `gh attestation verify <file> --owner drogers0` before installing.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/darwin-*
+            dist/linux-*
+            dist/windows-*
+            dist/android-*
