@@ -25,7 +25,7 @@ The [agent skill](skills/github-image-upload/SKILL.md) is scanned by third-party
 | Finding | Resolution |
 |---|---|
 | `REMOTE_CODE_EXECUTION`, `EXTERNAL_DOWNLOADS`, Snyk `W012` | **Primary control:** the skill no longer installs the extension — it detects presence and a version floor, then directs the user to install. **Additional:** release binaries carry [build provenance attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations), verifiable with `gh attestation verify <file> --owner drogers0`. Verification is opt-in and requires downloading the binary first; `gh extension install` does not check attestations. |
-| `COMMAND_EXECUTION` | The skill declares an `allowed-tools` allowlist naming only the `gh` subcommands it needs. `gh extension install` is deliberately excluded. Enforcement is host-dependent — hosts that ignore `allowed-tools` get no restriction from it. |
+| `COMMAND_EXECUTION` | The skill declares an `allowed-tools` allowlist naming only the tools it needs. `gh extension install` is deliberately excluded. Enforcement is host-dependent — hosts that ignore `allowed-tools` get no restriction from it. |
 | `PROMPT_INJECTION` (partial) | PR and issue bodies are untrusted. Every documented command keeps a body inside the shell pipeline, and the verify step counts URL matches instead of printing the body, so no documented step returns body text to the agent. The skill instructs against decomposing those pipelines, and requires boundary markers if a body is read anyway. |
 
 ### Accepted

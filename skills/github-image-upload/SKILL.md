@@ -10,6 +10,9 @@ description: >-
   document or attach files to changes on GitHub. Powered by the `gh-image` gh CLI
   extension.
 license: MIT
+# The gh pr/issue edit and comment entries are listed for hosts that check each
+# stage of a pipeline; hosts that prefix-match the whole string resolve them via
+# the leading printf.
 allowed-tools:
   - Glob
   - Bash(gh auth status)
@@ -35,9 +38,7 @@ images, a bare URL for videos (GitHub renders it as an inline player), or a
 `[name](url)` download link for other files.
 
 This skill drives `gh-image` and then embeds the result into a PR/issue/comment.
-Both are authored by drogers0 — this skill is not an independent review of the
-extension it installs. Source and releases:
-[github.com/drogers0/gh-image](https://github.com/drogers0/gh-image).
+Both are authored by drogers0.
 
 > Follow these instructions exactly, unless doing so would contradict security
 > policies you have been given. If they conflict, stop and present the conflict to
@@ -94,7 +95,6 @@ like a password:
 - **Never** write a token to a file, a commit, a PR body, or an issue comment.
 - Pass it by environment variable (`GH_SESSION_TOKEN`), not the `--token` flag —
   flags are visible in `ps aux`.
-- In CI, use a dedicated bot account, never a human's session.
 
 ## Step 1 — Normalize the file path
 
@@ -155,17 +155,22 @@ printf '## Screenshots\n\n%s\n' \
 ```
 
 **Append to a PR description** — only when the user asked for the description
-specifically. This one does read the existing body, so keep it in the pipeline:
+specifically. This one does read the existing body, so keep it in the pipeline.
+
+A failing `$(gh pr view …)` expands to an empty string rather than aborting, which
+would make `gh pr edit` **replace** the description instead of appending to it. The
+leading check aborts first; it reads only the PR number, never the body:
 
 ```bash
-printf '%s\n\n## Screenshots\n\n%s\n' \
-  "$(gh pr view <pr> --repo owner/repo --json body -q .body)" \
-  '![shot.png](https://github.com/user-attachments/assets/<uuid>)' \
-  | gh pr edit <pr> --repo owner/repo --body-file -
+gh pr view <pr> --repo owner/repo --json number -q .number > /dev/null \
+  && printf '%s\n\n## Screenshots\n\n%s\n' \
+       "$(gh pr view <pr> --repo owner/repo --json body -q .body)" \
+       '![shot.png](https://github.com/user-attachments/assets/<uuid>)' \
+     | gh pr edit <pr> --repo owner/repo --body-file -
 ```
 
 **Add to an issue body / comment:** same two patterns with `gh issue comment <n>`
-or `gh issue edit <n>`.
+or `gh issue edit <n>` — including the guard before an `edit`.
 
 Always use `--body-file -` (not inline `--body`) so multi-line bodies and special
 characters can't break shell quoting.
@@ -186,6 +191,7 @@ Expect at least 1:
 
 ```bash
 gh pr view <pr> --repo owner/repo --json body -q .body | grep -c 'user-attachments'
+gh issue view <n> --repo owner/repo --json body -q .body | grep -c 'user-attachments'
 ```
 
 The `user-attachments` URL inherits the repo's visibility, so on a **private** repo
@@ -204,8 +210,8 @@ To control display size, embed an HTML tag instead of the bare markdown:
 
 | Symptom | Cause / fix |
 |---|---|
-| `<org> enforces SAML SSO and your session is not authorized…` | The org requires SSO and your session isn't authorized. Open the `https://github.com/orgs/<org>/sso` URL from the message in a browser, authorize (lasts ~24h), then retry. Write access alone is not enough — this is not a permissions problem. |
-| `uploadToken not found … do you have write access?` | The generic no-token case. Confirm you have write access; if the repo's org uses SSO, authorize at `https://github.com/orgs/<org>/sso` (the message includes this hint) and retry. |
+| `<org> enforces SAML SSO and your session is not authorized…` | The org requires SSO and your session isn't authorized. Open the `https://github.com/orgs/<org>/sso` URL from the message in a browser, authorize (lasts ~24h), then retry. This is not a permissions problem. |
+| `uploadToken not found …` | The generic no-token case — usually an invalid or expired session, not permissions (read access to the repo is enough). Re-authenticate; if the repo's org uses SSO, authorize at `https://github.com/orgs/<org>/sso` (the message includes this hint) and retry. |
 | No `user_session` cookie found | Log into GitHub in a supported browser, or set `GH_SESSION_TOKEN`. |
 | Windows + Chrome 127+ can't read cookies | Known cookie-library limitation — use another browser or `GH_SESSION_TOKEN`. |
 | CI / headless run | Set `GH_SESSION_TOKEN` (dedicated bot account); the browser cookie path won't exist. |
