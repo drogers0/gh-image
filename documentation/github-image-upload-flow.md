@@ -6,6 +6,10 @@ GitHub does not provide a public API for uploading attachments (images or files 
 
 Attachments uploaded this way are scoped to the repository's visibility — private repo uploads require authentication to view (unlike GitHub Release assets, which are always public on public repos).
 
+### The bearer alternative
+
+`POST https://uploads.github.com/user-attachments/assets?name=&content_type=&repository_id=` accepts `Authorization: Bearer <gh auth token>` and returns `201 {"url": ...}` in one request, no cookie and no S3 leg. It is also undocumented, and narrower than the flow below in two ways: it serves only images and video (other content types get `422 content_type is not included in the list of allowed content types`), and only repositories the token can push to (others get `404`). A `Content-Type` request header is mandatory — without one the endpoint answers `400 Invalid Content-Type'` before validating anything else. `gh-image` tries this route first and falls back to the flow below.
+
 ## Prerequisites
 
 The only browser credential needed is the `user_session` cookie from `github.com`. GitHub also requires the `__Host-user_session_same_site` cookie for CSRF validation on the upload endpoints — this cookie has the same value as `user_session` (just with a stricter SameSite policy), so it can be synthesized from `user_session` rather than read separately. Everything else (CSRF tokens, S3 presigned URLs) is derived during the flow.

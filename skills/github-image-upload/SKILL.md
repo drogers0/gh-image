@@ -52,10 +52,11 @@ Check these first. Report failures — do not install or authenticate for the us
    drogers0/gh-image`. Older → the user runs `gh extension upgrade gh-image`. `dev` →
    a local build, warn and continue. Never run install or upgrade yourself.
 
-3. A session credential. That endpoint rejects `gh` tokens; `gh-image` needs the
-   `user_session` cookie, from `GH_SESSION_TOKEN` (CI / headless) or a logged-in
-   browser (Chrome/Brave/Chromium/Edge/Firefox/Opera/Safari — the local default;
-   macOS may prompt for Keychain access, click **Always Allow**).
+3. A session credential, needed for files other than images and video, and for
+   repositories you cannot push to (everything else uploads with the `gh` token).
+   It is the `user_session` cookie, from `GH_SESSION_TOKEN` (CI / headless) or a
+   logged-in browser (Chrome/Brave/Chromium/Edge/Firefox/Opera/Safari — the local
+   default; macOS may prompt for Keychain access, click **Always Allow**).
 
    That cookie grants **full account access** — it is not scoped like a PAT, and
    GitHub offers nothing narrower for this endpoint. Never print, log, or store its

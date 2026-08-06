@@ -23,6 +23,9 @@ const usage = `Usage:
 // version is set via -ldflags "-X main.version=..." at release build time.
 var version = "dev"
 
+// sessionTokenEnvVar supplies the user_session cookie value without a flag.
+const sessionTokenEnvVar = "GH_SESSION_TOKEN"
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, productionDeps()))
 }
@@ -33,12 +36,13 @@ type uploadFunc func(info *repo.Info, path string) (string, error)
 // deps are the I/O boundaries run() depends on; productionDeps wires the real ones,
 // tests inject stubs so the orchestration spine runs without network/subprocess/exit.
 type deps struct {
-	resolveRepo   func(owner, name string) (*repo.Info, error)
-	resolveCookie func(tokenFlag string) (*http.Cookie, error)
-	// newUploader builds an uploader from a session cookie. It is called once per
-	// run so the underlying HTTP client (and its cookie jar) is shared across all
-	// files, matching the single-client behavior of the original implementation.
-	newUploader  func(cookie *http.Cookie) uploadFunc
+	resolveRepo func(owner, name string) (*repo.Info, error)
+	// newUploader builds an uploader for the run. It is called once so both the
+	// bearer client and the session-cookie client (and its cookie jar) are shared
+	// across all files. The session is resolved lazily, on the first file that
+	// needs the browser-session flow, so runs that stay on the fast path never
+	// touch the browser's cookie store.
+	newUploader  func(tokenFlag string, stderr io.Writer) uploadFunc
 	extractToken func() (string, error)
 	checkToken   func(tokenFlag string) (username, source string, err error)
 }
@@ -46,14 +50,33 @@ type deps struct {
 func productionDeps() deps {
 	return deps{
 		resolveRepo: repo.Resolve,
-		resolveCookie: func(tokenFlag string) (*http.Cookie, error) {
-			cookie, _, err := resolveSessionCookie(tokenFlag)
-			return cookie, err
-		},
-		newUploader: func(cookie *http.Cookie) uploadFunc {
-			client := upload.NewClient(cookie)
+		newUploader: func(tokenFlag string, stderr io.Writer) uploadFunc {
+			// An explicitly supplied session token names the account that uploads;
+			// the bearer route authenticates as whoever gh is, so honoring that
+			// choice means staying on the cookie route for every file.
+			var newBearer func() (*upload.BearerClient, error)
+			if tokenFlag == "" && os.Getenv(sessionTokenEnvVar) == "" {
+				newBearer = func() (*upload.BearerClient, error) {
+					token, err := upload.GHAuthToken()
+					if err != nil {
+						return nil, err
+					}
+					return upload.NewBearerClient(token), nil
+				}
+			}
+			router := upload.NewRouter(
+				newBearer,
+				func() (*upload.Client, error) {
+					cookie, _, err := resolveSessionCookie(tokenFlag)
+					if err != nil {
+						return nil, err
+					}
+					return upload.NewClient(cookie), nil
+				},
+				func(msg string) { fmt.Fprintln(stderr, msg) },
+			)
 			return func(info *repo.Info, path string) (string, error) {
-				res, err := client.Upload(info.Owner, info.Name, info.ID, path)
+				res, err := router.Upload(info.Owner, info.Name, info.ID, path)
 				if err != nil {
 					return "", err
 				}
@@ -245,15 +268,10 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		return 1
 	}
 
-	// Get session cookie (flag > env var > browser)
-	cookie, err := d.resolveCookie(tokenFlag)
-	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 1
-	}
-
-	// Build the uploader once so its HTTP client/cookie jar is shared across files.
-	uploadFile := d.newUploader(cookie)
+	// Build the uploader once so its HTTP clients are shared across files. The
+	// session cookie behind it is resolved only if a file needs the
+	// browser-session flow.
+	uploadFile := d.newUploader(tokenFlag, stderr)
 
 	// Upload each file, continuing on error
 	hasError := false
@@ -319,7 +337,7 @@ func resolveSessionCookie(tokenFlag string) (*http.Cookie, string, error) {
 			return err
 		})
 	}
-	return resolveSessionCookieWithGetter(tokenFlag, os.Getenv("GH_SESSION_TOKEN"), get)
+	return resolveSessionCookieWithGetter(tokenFlag, os.Getenv(sessionTokenEnvVar), get)
 }
 
 // resolveSessionCookieWithGetter is a testable variant of resolveSessionCookie

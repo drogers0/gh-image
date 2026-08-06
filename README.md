@@ -153,6 +153,8 @@ A <code>demo-videos</code> skill publishes the <b>README demo reels</b> &mdash; 
 
 `gh-image` authenticates with your existing GitHub session — **no tokens to provision, no OAuth scopes to configure** for everyday local use. The tool reads the `user_session` cookie from your browser's encrypted cookie store.
 
+Images and video going to a repository you can push to are uploaded with your `gh` CLI token instead, and never touch the browser cookie store. Everything else — other file types, and repositories you cannot push to — uses the session below.
+
 **Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari
 
 **Supported platforms:** macOS · Linux · Windows · Android (Termux)
@@ -164,7 +166,7 @@ On macOS, a Keychain prompt may appear on first use to authorize access to your 
 
 ### Session token override
 
-For CI, headless environments, or shared machines, you can supply the session token explicitly. Resolution order (first match wins):
+For CI, headless environments, or shared machines, you can supply the session token explicitly. Doing so also pins every upload to the browser-session flow, so the account it names is the account that uploads. Resolution order (first match wins):
 
 | Priority | Source | When to use |
 |---|---|---|
@@ -222,7 +224,7 @@ jobs:
 
 ## How it works
 
-1. Resolves a `user_session` cookie from the configured source (flag → env → browser).
+1. Tries a single authenticated upload with the `gh` CLI token; on failure falls back to the browser-session flow below, resolving a `user_session` cookie from the configured source (flag → env → browser).
 2. Fetches the target repository's page to obtain an `uploadToken` from the embedded JS payload.
 3. Requests an S3 upload policy from `/upload/policies/assets`.
 4. Uploads the file directly to S3 using the presigned form fields.
@@ -235,7 +237,7 @@ For the full architecture, see **[documentation/architecture.md](documentation/a
 
 ## Requirements
 
-- A supported browser with an active GitHub session — or a `GH_SESSION_TOKEN` for CI.
+- A supported browser with an active GitHub session — or a `GH_SESSION_TOKEN` for CI. Needed for files other than images and video, and for repositories you cannot push to.
 - Read access to the target repository — write access is not required.
 - A target repository — pass `--repo owner/repo`, or run from a git workspace whose `origin` remote is on GitHub.
 - The `gh` CLI must be installed and authenticated (used for repository ID lookup).
@@ -245,6 +247,7 @@ For the full architecture, see **[documentation/architecture.md](documentation/a
 - Uses an **undocumented** internal GitHub API that may change without notice.
 - `uploadToken` is usually present on repository pages for any user who can view the repo. An invalid or expired session is the case where it is absent.
 - Session cookies are not scoped credentials; they expire when GitHub invalidates the session.
+- Uploads are attributed to the account that authenticated them, so if your browser session and your `gh` login are different accounts, images and video may be attributed differently from other files. Supply a session token explicitly to pin every upload to one account.
 
 ## Contributing
 
