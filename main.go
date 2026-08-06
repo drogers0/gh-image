@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/drogers0/gh-image/internal/cookies"
+	"github.com/drogers0/gh-image/internal/download"
 	"github.com/drogers0/gh-image/internal/repo"
 	"github.com/drogers0/gh-image/internal/session"
 	"github.com/drogers0/gh-image/internal/upload"
@@ -16,6 +18,7 @@ import (
 
 const usage = `Usage:
   gh image [--repo owner/repo] [--token <value>] <file-path>...
+  gh image download [--output <file>|-] [--output-dir <dir>] [--no-clobber] [--token <value>] <url>...
   gh image extract-token
   gh image check-token [--token <value>]
   gh image --version`
@@ -45,6 +48,17 @@ type deps struct {
 	newUploader  func(tokenFlag string, stderr io.Writer) uploadFunc
 	extractToken func() (string, error)
 	checkToken   func(tokenFlag string) (username, source string, err error)
+	// newDownloader builds a downloader for the run. Like newUploader it takes
+	// both routes and resolves each lazily, so a run that stays on the bearer
+	// token never touches the browser's cookie store.
+	newDownloader func(tokenFlag string, stderr io.Writer) downloader
+}
+
+// downloader is the injected download boundary. Save writes to disk, Stream
+// writes to a caller-supplied writer; no resolve metadata crosses this seam.
+type downloader interface {
+	Save(ref download.Ref, dest download.Dest) (string, error)
+	Stream(ref download.Ref, w io.Writer) (int64, error)
 }
 
 func productionDeps() deps {
@@ -87,6 +101,20 @@ func productionDeps() deps {
 		checkToken: func(tokenFlag string) (string, string, error) {
 			return checkToken(tokenFlag, resolveSessionCookie, session.CheckValidity)
 		},
+		newDownloader: func(tokenFlag string, stderr io.Writer) downloader {
+			var newBearer func() (string, error)
+			if useBearerRoute(tokenFlag, os.Getenv(sessionTokenEnvVar)) {
+				newBearer = upload.GHAuthToken
+			}
+			return download.NewClient(
+				newBearer,
+				func() (*http.Cookie, error) {
+					cookie, _, err := resolveSessionCookie(tokenFlag)
+					return cookie, err
+				},
+				func(msg string) { fmt.Fprintln(stderr, msg) },
+			)
+		},
 	}
 }
 
@@ -97,6 +125,8 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 	var tokenSet bool
 	var paths []string
 	var firstPosAfterDoubleDash bool
+	var output, outputDir string
+	var outputSet, outputDirSet, noClobber bool
 
 	// Manual arg parsing so flags can appear anywhere (before or after positional args).
 	flagsDone := false
@@ -161,6 +191,20 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 				return 1
 			}
 			tokenSet = true
+		case arg == "--output" || strings.HasPrefix(arg, "--output="):
+			if err := parseValueFlag(arg, args, &i, "--output", &output, &outputSet); err != nil {
+				return reportFlagError(stderr, err)
+			}
+		case arg == "--output-dir" || strings.HasPrefix(arg, "--output-dir="):
+			if err := parseValueFlag(arg, args, &i, "--output-dir", &outputDir, &outputDirSet); err != nil {
+				return reportFlagError(stderr, err)
+			}
+		case arg == "--no-clobber":
+			if noClobber {
+				fmt.Fprintf(stderr, "Error: --no-clobber specified more than once\n")
+				return 1
+			}
+			noClobber = true
 		case arg == "--version":
 			fmt.Fprintf(stdout, "gh-image %s\n", version)
 			return 0
@@ -180,8 +224,19 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 			fmt.Fprintln(stdout, "  --version           Print version and exit")
 			fmt.Fprintln(stdout)
 			fmt.Fprintln(stdout, "Subcommands:")
+			fmt.Fprintln(stdout, "  download            Download user-attachments URLs to files or stdout")
 			fmt.Fprintln(stdout, "  extract-token       Extract session token from browser and print to stdout")
 			fmt.Fprintln(stdout, "  check-token         Verify a session token is valid and print username to stdout")
+			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout, "Download flags:")
+			fmt.Fprintln(stdout, "  --output <file>     Write a single URL to this exact path (overwrites)")
+			fmt.Fprintln(stdout, "  --output -          Stream a single URL to stdout")
+			fmt.Fprintln(stdout, "  --output-dir <dir>  Write derived filenames into this directory")
+			fmt.Fprintln(stdout, "  --no-clobber        Never overwrite; add a .1, .2 suffix instead")
+			fmt.Fprintln(stdout)
+			fmt.Fprintln(stdout, "With no --output flag, files land in the current directory under a name")
+			fmt.Fprintln(stdout, "derived from the URL. Downloads authenticate with the same session token")
+			fmt.Fprintln(stdout, "as uploads (--token, GH_SESSION_TOKEN, or the browser cookie).")
 			fmt.Fprintln(stdout)
 			fmt.Fprintln(stdout, "Use -- to separate flags from filenames starting with a dash:")
 			fmt.Fprintln(stdout, "  gh image -- -screenshot.png")
@@ -199,7 +254,15 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 	}
 
 	// Dispatch subcommands before any other validation.
-	subcommand, dispatchErr := classifySubcommand(paths, firstPosAfterDoubleDash, tokenFlag, repoSet)
+	opts := cliOptions{
+		firstPosAfterDoubleDash: firstPosAfterDoubleDash,
+		tokenFlag:               tokenFlag,
+		repoSet:                 repoSet,
+		outputSet:               outputSet,
+		outputDirSet:            outputDirSet,
+		noClobber:               noClobber,
+	}
+	subcommand, dispatchErr := classifySubcommand(paths, opts)
 	if dispatchErr != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", dispatchErr)
 		var ue *usageError
@@ -229,6 +292,14 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 			fmt.Fprintln(stdout, username)
 		}
 		return 0
+	case "download":
+		return runDownload(paths[1:], downloadOptions{
+			output:    output,
+			outputSet: outputSet,
+			outputDir: outputDir,
+			noClobber: noClobber,
+			tokenFlag: tokenFlag,
+		}, stdout, stderr, d)
 	}
 
 	if len(paths) == 0 {
@@ -294,32 +365,46 @@ func (e *usageError) Error() string { return e.err.Error() }
 
 // classifySubcommand identifies whether the parsed positional args represent a
 // supported subcommand invocation and validates subcommand-specific constraints.
-func classifySubcommand(paths []string, firstPosAfterDoubleDash bool, tokenFlag string, repoSet bool) (string, error) {
-	if len(paths) == 0 || firstPosAfterDoubleDash {
-		return "", nil
+func classifySubcommand(paths []string, opts cliOptions) (string, error) {
+	// download-only flags are meaningless everywhere else, so reject them rather
+	// than letting an upload silently ignore an --output the user meant.
+	notDownload := func(mode string) error {
+		if flag := opts.downloadOnly(); flag != "" {
+			return fmt.Errorf("%s can only be used with download, not %s", flag, mode)
+		}
+		return nil
+	}
+	if len(paths) == 0 || opts.firstPosAfterDoubleDash {
+		return "", notDownload("upload")
 	}
 	switch paths[0] {
 	case "extract-token":
 		if len(paths) > 1 {
 			return "", &usageError{fmt.Errorf("extract-token does not take positional arguments")}
 		}
-		if tokenFlag != "" {
+		if opts.tokenFlag != "" {
 			return "", fmt.Errorf("--token cannot be combined with extract-token (extract-token always reads from browser)")
 		}
-		if repoSet {
+		if opts.repoSet {
 			return "", fmt.Errorf("--repo cannot be combined with extract-token")
 		}
-		return "extract-token", nil
+		return "extract-token", notDownload("extract-token")
 	case "check-token":
 		if len(paths) > 1 {
 			return "", &usageError{fmt.Errorf("check-token does not take positional arguments")}
 		}
-		if repoSet {
+		if opts.repoSet {
 			return "", fmt.Errorf("--repo cannot be combined with check-token")
 		}
-		return "check-token", nil
+		return "check-token", notDownload("check-token")
+	case "download":
+		// Attachment URLs carry no repository, so --repo has nothing to act on.
+		if opts.repoSet {
+			return "", fmt.Errorf("--repo cannot be combined with download (attachment URLs carry no repository)")
+		}
+		return "download", nil
 	default:
-		return "", nil
+		return "", notDownload("upload")
 	}
 }
 
@@ -337,10 +422,10 @@ func resolveSessionCookie(tokenFlag string) (*http.Cookie, string, error) {
 	return resolveSessionCookieWithGetter(tokenFlag, os.Getenv(sessionTokenEnvVar), get)
 }
 
-// useBearerRoute reports whether uploads may take the gh-token fast path.
-// An explicitly supplied session token names the account that uploads, and the
-// bearer route authenticates as whoever gh is, so honoring that choice means
-// staying on the browser-session flow for every file. The inputs mirror
+// useBearerRoute reports whether an upload or download may take the gh-token
+// fast path. An explicitly supplied session token names the account to act as,
+// and the bearer route authenticates as whoever gh is, so honoring that choice
+// means staying on the browser-session flow for every file. The inputs mirror
 // resolveSessionCookieWithGetter's first two, so the two decisions read from
 // the same sources.
 func useBearerRoute(tokenFlag, envToken string) bool {
@@ -404,4 +489,147 @@ func checkToken(tokenFlag string, resolver func(string) (*http.Cookie, string, e
 		return "", "", err
 	}
 	return username, source, nil
+}
+
+// cliOptions carries parsed flag state into subcommand classification, so a new
+// flag does not mean a new positional parameter on classifySubcommand.
+type cliOptions struct {
+	firstPosAfterDoubleDash bool
+	tokenFlag               string
+	repoSet                 bool
+	outputSet               bool
+	outputDirSet            bool
+	noClobber               bool
+}
+
+// downloadOnly reports whether any download-only flag was given. Those flags are
+// rejected outside the download subcommand rather than silently ignored.
+func (o cliOptions) downloadOnly() string {
+	switch {
+	case o.outputSet:
+		return "--output"
+	case o.outputDirSet:
+		return "--output-dir"
+	case o.noClobber:
+		return "--no-clobber"
+	}
+	return ""
+}
+
+// parseValueFlag matches a value-taking long flag in either "--name value" or
+// "--name=value" form, applying the single-use, missing-value and empty-value
+// rules. It exists because those rules are otherwise ten near-identical lines
+// per flag per form; the older --repo and --token cases still spell them out.
+func parseValueFlag(arg string, args []string, i *int, name string, dst *string, set *bool) error {
+	if *set {
+		return fmt.Errorf("%s specified more than once", name)
+	}
+	if arg == name {
+		if *i+1 >= len(args) {
+			return &usageError{fmt.Errorf("%s requires a value", name)}
+		}
+		*i++
+		*dst = strings.TrimSpace(args[*i])
+	} else {
+		*dst = strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
+	}
+	if *dst == "" {
+		return &usageError{fmt.Errorf("%s value cannot be empty", name)}
+	}
+	*set = true
+	return nil
+}
+
+// reportFlagError prints a flag error, adding the usage block when the error is
+// a usageError — the same treatment subcommand dispatch gives its errors.
+func reportFlagError(stderr io.Writer, err error) int {
+	fmt.Fprintf(stderr, "Error: %v\n", err)
+	var ue *usageError
+	if errors.As(err, &ue) {
+		fmt.Fprintf(stderr, "%s\nRun 'gh image --help' for usage.\n", usage)
+	}
+	return 1
+}
+
+// downloadOptions is the download subcommand's slice of the parsed flags.
+type downloadOptions struct {
+	output    string
+	outputSet bool
+	outputDir string
+	noClobber bool
+	tokenFlag string
+}
+
+// runDownload fetches each URL. Everything that can be checked without the
+// network is checked first, so a bad flag combination fails immediately.
+func runDownload(urls []string, o downloadOptions, stdout, stderr io.Writer, d deps) int {
+	if len(urls) == 0 {
+		fmt.Fprintf(stderr, "Error: download requires at least one user-attachments URL\n%s\n", usage)
+		return 1
+	}
+	stdoutMode := o.outputSet && o.output == "-"
+	switch {
+	case o.outputSet && o.outputDir != "":
+		fmt.Fprintf(stderr, "Error: --output and --output-dir cannot be combined\n")
+		return 1
+	case o.outputSet && len(urls) > 1:
+		fmt.Fprintf(stderr, "Error: --output takes a single URL; use --output-dir for several\n")
+		return 1
+	}
+
+	refs := make([]download.Ref, 0, len(urls))
+	for _, raw := range urls {
+		ref, err := download.ParseRef(raw)
+		if err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			return 1
+		}
+		refs = append(refs, ref)
+	}
+
+	// Build the destination up front so a missing directory is created once, and
+	// so an unusable --output fails before any request is made.
+	var dest download.Dest
+	if !stdoutMode {
+		dest = download.Dest{Dir: ".", NoClobber: o.noClobber}
+		switch {
+		case o.outputSet:
+			dest.Exact = o.output
+			dest.Dir = ""
+		case o.outputDir != "":
+			dest.Dir = o.outputDir
+		}
+		dir := dest.Dir
+		if dest.Exact != "" {
+			dir = filepath.Dir(dest.Exact)
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fmt.Fprintf(stderr, "Error: creating %s: %v\n", dir, err)
+			return 1
+		}
+	}
+
+	dl := d.newDownloader(o.tokenFlag, stderr)
+
+	hasError := false
+	for _, ref := range refs {
+		if stdoutMode {
+			if _, err := dl.Stream(ref, stdout); err != nil {
+				fmt.Fprintf(stderr, "Error downloading %s: %v\n", ref.URL, err)
+				hasError = true
+			}
+			continue
+		}
+		written, err := dl.Save(ref, dest)
+		if err != nil {
+			fmt.Fprintf(stderr, "Error downloading %s: %v\n", ref.URL, err)
+			hasError = true
+			continue
+		}
+		fmt.Fprintln(stdout, written)
+	}
+	if hasError {
+		return 1
+	}
+	return 0
 }

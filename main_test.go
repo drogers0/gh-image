@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/drogers0/gh-image/internal/download"
 	"github.com/drogers0/gh-image/internal/repo"
 	"github.com/drogers0/gh-image/internal/upload"
 )
@@ -30,8 +33,50 @@ func okDeps() deps {
 		},
 		extractToken: func() (string, error) { return "extracted-token", nil },
 		checkToken:   func(tokenFlag string) (string, string, error) { return "octouser", "stub", nil },
+		newDownloader: func(tokenFlag string, stderr io.Writer) downloader {
+			return &stubDownloader{}
+		},
 	}
 }
+
+// stubDownloader records what run() asked for. It writes nothing to disk, so the
+// CLI spine is exercised without touching the filesystem or the network.
+type stubDownloader struct {
+	saved   []download.Ref
+	dests   []download.Dest
+	streams []download.Ref
+	body    string
+	failOn  string
+}
+
+func (s *stubDownloader) Save(ref download.Ref, dest download.Dest) (string, error) {
+	s.saved = append(s.saved, ref)
+	s.dests = append(s.dests, dest)
+	if s.failOn != "" && strings.Contains(ref.URL, s.failOn) {
+		return "", fmt.Errorf("save failed")
+	}
+	return filepath.Join(dest.Dir, ref.ID), nil
+}
+
+func (s *stubDownloader) Stream(ref download.Ref, w io.Writer) (int64, error) {
+	s.streams = append(s.streams, ref)
+	if s.failOn != "" && strings.Contains(ref.URL, s.failOn) {
+		return 0, fmt.Errorf("stream failed")
+	}
+	n, err := io.WriteString(w, s.body)
+	return int64(n), err
+}
+
+// depsWith returns okDeps plus a handle on the download stub it will hand out.
+func depsWith(dl *stubDownloader) deps {
+	d := okDeps()
+	d.newDownloader = func(tokenFlag string, stderr io.Writer) downloader { return dl }
+	return d
+}
+
+const assetURL = "https://github.com/user-attachments/assets/9f57198c-19d3-4ba0-a48d-ba4bcaccf9f0"
+const asset2URL = "https://github.com/user-attachments/assets/92463e67-b897-4212-91b4-a4f9b80ec4d4"
+const fileURL = "https://github.com/user-attachments/files/30473702/notes.txt"
 
 // runWith executes run() with buffered streams and returns the exit code + output.
 func runWith(t *testing.T, args []string, d deps) (code int, stdout, stderr string) {
@@ -544,21 +589,19 @@ func TestUseBearerRoute(t *testing.T) {
 
 func TestProductionDeps_WiringComplete(t *testing.T) {
 	d := productionDeps()
-	if d.resolveRepo == nil || d.newUploader == nil || d.extractToken == nil || d.checkToken == nil {
+	if d.resolveRepo == nil || d.newUploader == nil || d.extractToken == nil || d.checkToken == nil || d.newDownloader == nil {
 		t.Fatal("productionDeps left a boundary unwired")
 	}
 }
 
 func TestClassifySubcommand(t *testing.T) {
 	tests := []struct {
-		name                    string
-		paths                   []string
-		firstPosAfterDoubleDash bool
-		tokenFlag               string
-		repoSet                 bool
-		wantSubcommand          string
-		wantErrContains         string
-		wantUsageError          bool
+		name            string
+		paths           []string
+		opts            cliOptions
+		wantSubcommand  string
+		wantErrContains string
+		wantUsageError  bool
 	}{
 		{
 			name:           "extract-token selected",
@@ -571,16 +614,16 @@ func TestClassifySubcommand(t *testing.T) {
 			wantSubcommand: "check-token",
 		},
 		{
-			name:                    "double-dash treats check-token as filename",
-			paths:                   []string{"check-token"},
-			firstPosAfterDoubleDash: true,
-			wantSubcommand:          "",
+			name:           "double-dash treats check-token as filename",
+			paths:          []string{"check-token"},
+			opts:           cliOptions{firstPosAfterDoubleDash: true},
+			wantSubcommand: "",
 		},
 		{
-			name:                    "double-dash treats extract-token as filename",
-			paths:                   []string{"extract-token"},
-			firstPosAfterDoubleDash: true,
-			wantSubcommand:          "",
+			name:           "double-dash treats extract-token as filename",
+			paths:          []string{"extract-token"},
+			opts:           cliOptions{firstPosAfterDoubleDash: true},
+			wantSubcommand: "",
 		},
 		{
 			name:            "extract-token with extra args errors",
@@ -597,7 +640,7 @@ func TestClassifySubcommand(t *testing.T) {
 		{
 			name:            "extract-token with token flag errors",
 			paths:           []string{"extract-token"},
-			tokenFlag:       "abc123",
+			opts:            cliOptions{tokenFlag: "abc123"},
 			wantErrContains: "--token cannot be combined",
 		},
 		{
@@ -608,20 +651,73 @@ func TestClassifySubcommand(t *testing.T) {
 		{
 			name:            "extract-token with repo flag errors",
 			paths:           []string{"extract-token"},
-			repoSet:         true,
+			opts:            cliOptions{repoSet: true},
 			wantErrContains: "--repo cannot be combined with extract-token",
 		},
 		{
 			name:            "check-token with repo flag errors",
 			paths:           []string{"check-token"},
-			repoSet:         true,
+			opts:            cliOptions{repoSet: true},
 			wantErrContains: "--repo cannot be combined with check-token",
+		},
+		{
+			name:           "download selected",
+			paths:          []string{"download", "https://github.com/user-attachments/assets/x"},
+			wantSubcommand: "download",
+		},
+		{
+			name:           "double-dash treats download as filename",
+			paths:          []string{"download"},
+			opts:           cliOptions{firstPosAfterDoubleDash: true},
+			wantSubcommand: "",
+		},
+		{
+			name:            "download with repo flag errors",
+			paths:           []string{"download", "url"},
+			opts:            cliOptions{repoSet: true},
+			wantErrContains: "--repo cannot be combined with download",
+		},
+		{
+			name:            "--output outside download errors",
+			paths:           []string{"image.png"},
+			opts:            cliOptions{outputSet: true},
+			wantErrContains: "--output can only be used with download",
+		},
+		{
+			name:            "--output-dir outside download errors",
+			paths:           []string{"image.png"},
+			opts:            cliOptions{outputDirSet: true},
+			wantErrContains: "--output-dir can only be used with download",
+		},
+		{
+			name:            "--no-clobber outside download errors",
+			paths:           []string{"image.png"},
+			opts:            cliOptions{noClobber: true},
+			wantErrContains: "--no-clobber can only be used with download",
+		},
+		{
+			name:            "--output with check-token errors",
+			paths:           []string{"check-token"},
+			opts:            cliOptions{outputSet: true},
+			wantErrContains: "--output can only be used with download",
+		},
+		{
+			name:            "--no-clobber with no positionals errors",
+			paths:           nil,
+			opts:            cliOptions{noClobber: true},
+			wantErrContains: "--no-clobber can only be used with download",
+		},
+		{
+			name:           "download flags allowed with download",
+			paths:          []string{"download", "url"},
+			opts:           cliOptions{outputSet: true, noClobber: true},
+			wantSubcommand: "download",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotSubcommand, err := classifySubcommand(tc.paths, tc.firstPosAfterDoubleDash, tc.tokenFlag, tc.repoSet)
+			gotSubcommand, err := classifySubcommand(tc.paths, tc.opts)
 			if tc.wantErrContains != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErrContains)
@@ -645,5 +741,260 @@ func TestClassifySubcommand(t *testing.T) {
 				t.Fatalf("expected subcommand %q, got %q", tc.wantSubcommand, gotSubcommand)
 			}
 		})
+	}
+}
+
+func TestRun_Download(t *testing.T) {
+	t.Run("single URL prints the written path", func(t *testing.T) {
+		dl := &stubDownloader{}
+		code, out, _ := runWith(t, []string{"download", assetURL}, depsWith(dl))
+		if code != 0 {
+			t.Fatalf("code=%d", code)
+		}
+		if len(dl.saved) != 1 || dl.saved[0].URL != assetURL {
+			t.Fatalf("saved=%+v", dl.saved)
+		}
+		if strings.TrimSpace(out) == "" {
+			t.Error("expected the written path on stdout")
+		}
+	})
+
+	t.Run("the download positional is not treated as a URL", func(t *testing.T) {
+		dl := &stubDownloader{}
+		runWith(t, []string{"download", assetURL}, depsWith(dl))
+		for _, ref := range dl.saved {
+			if ref.URL == "download" {
+				t.Fatal("the literal \"download\" reached ParseRef")
+			}
+		}
+	})
+
+	t.Run("several URLs each download", func(t *testing.T) {
+		dl := &stubDownloader{}
+		code, out, _ := runWith(t, []string{"download", assetURL, fileURL}, depsWith(dl))
+		if code != 0 || len(dl.saved) != 2 {
+			t.Fatalf("code=%d saved=%d", code, len(dl.saved))
+		}
+		if lines := strings.Split(strings.TrimSpace(out), "\n"); len(lines) != 2 {
+			t.Fatalf("expected one path per URL, got %q", out)
+		}
+	})
+
+	t.Run("one failure still writes the others and exits 1", func(t *testing.T) {
+		dl := &stubDownloader{failOn: "92463e67"}
+		code, out, errOut := runWith(t, []string{"download", assetURL, asset2URL}, depsWith(dl))
+		if code != 1 {
+			t.Fatalf("code=%d, want 1", code)
+		}
+		if lines := strings.Split(strings.TrimSpace(out), "\n"); len(lines) != 1 {
+			t.Fatalf("expected the surviving path on stdout, got %q", out)
+		}
+		if !strings.Contains(errOut, "Error downloading") {
+			t.Errorf("stderr missing the failure: %q", errOut)
+		}
+	})
+
+	t.Run("no URLs is a usage error", func(t *testing.T) {
+		code, _, errOut := runWith(t, []string{"download"}, okDeps())
+		if code != 1 || !strings.Contains(errOut, "at least one") {
+			t.Fatalf("code=%d err=%q", code, errOut)
+		}
+	})
+
+	t.Run("a non-github URL is rejected before any request", func(t *testing.T) {
+		dl := &stubDownloader{}
+		code, _, errOut := runWith(t, []string{"download", "https://example.com/user-attachments/assets/x"}, depsWith(dl))
+		if code != 1 || len(dl.saved) != 0 {
+			t.Fatalf("code=%d saved=%d", code, len(dl.saved))
+		}
+		if !strings.Contains(errOut, "github.com") {
+			t.Errorf("stderr=%q", errOut)
+		}
+	})
+
+	t.Run("--repo is rejected", func(t *testing.T) {
+		code, _, errOut := runWith(t, []string{"download", "--repo", "o/r", assetURL}, okDeps())
+		if code != 1 || !strings.Contains(errOut, "--repo cannot be combined with download") {
+			t.Fatalf("code=%d err=%q", code, errOut)
+		}
+	})
+}
+
+func TestRun_DownloadOutputModes(t *testing.T) {
+	t.Run("--output - streams to run's stdout and writes no file", func(t *testing.T) {
+		dl := &stubDownloader{body: "raw-bytes"}
+		code, out, _ := runWith(t, []string{"download", "--output", "-", assetURL}, depsWith(dl))
+		if code != 0 {
+			t.Fatalf("code=%d", code)
+		}
+		if out != "raw-bytes" {
+			t.Fatalf("stdout=%q, want the asset body", out)
+		}
+		if len(dl.saved) != 0 {
+			t.Error("Save was called in stdout mode")
+		}
+		if len(dl.streams) != 1 {
+			t.Error("Stream was not called")
+		}
+	})
+
+	t.Run("--output sets an exact destination", func(t *testing.T) {
+		dir := t.TempDir()
+		exact := filepath.Join(dir, "chosen.png")
+		dl := &stubDownloader{}
+		if code, _, errOut := runWith(t, []string{"download", "--output", exact, assetURL}, depsWith(dl)); code != 0 {
+			t.Fatalf("code=%d err=%q", code, errOut)
+		}
+		if len(dl.dests) != 1 || dl.dests[0].Exact != exact || dl.dests[0].Dir != "" {
+			t.Fatalf("dest=%+v", dl.dests)
+		}
+	})
+
+	t.Run("--output-dir sets the directory and creates it", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "nested", "out")
+		dl := &stubDownloader{}
+		if code, _, errOut := runWith(t, []string{"download", "--output-dir", dir, assetURL}, depsWith(dl)); code != 0 {
+			t.Fatalf("code=%d err=%q", code, errOut)
+		}
+		if len(dl.dests) != 1 || dl.dests[0].Dir != dir {
+			t.Fatalf("dest=%+v", dl.dests)
+		}
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("--output-dir was not created: %v", err)
+		}
+	})
+
+	t.Run("no output flag defaults to the current directory", func(t *testing.T) {
+		dl := &stubDownloader{}
+		runWith(t, []string{"download", assetURL}, depsWith(dl))
+		if len(dl.dests) != 1 || dl.dests[0].Dir != "." || dl.dests[0].Exact != "" {
+			t.Fatalf("dest=%+v", dl.dests)
+		}
+	})
+
+	t.Run("--no-clobber reaches the downloader", func(t *testing.T) {
+		dl := &stubDownloader{}
+		runWith(t, []string{"download", "--no-clobber", assetURL}, depsWith(dl))
+		if len(dl.dests) != 1 || !dl.dests[0].NoClobber {
+			t.Fatalf("dest=%+v", dl.dests)
+		}
+	})
+
+	t.Run("--output with several URLs is an error", func(t *testing.T) {
+		for _, value := range []string{"out.png", "-"} {
+			dl := &stubDownloader{}
+			code, _, errOut := runWith(t, []string{"download", "--output", value, assetURL, asset2URL}, depsWith(dl))
+			if code != 1 || !strings.Contains(errOut, "single URL") {
+				t.Errorf("--output %s: code=%d err=%q", value, code, errOut)
+			}
+			if len(dl.saved) != 0 || len(dl.streams) != 0 {
+				t.Errorf("--output %s: downloaded despite the usage error", value)
+			}
+		}
+	})
+
+	t.Run("--output and --output-dir cannot be combined", func(t *testing.T) {
+		code, _, errOut := runWith(t, []string{"download", "--output", "a", "--output-dir", "b", assetURL}, okDeps())
+		if code != 1 || !strings.Contains(errOut, "cannot be combined") {
+			t.Fatalf("code=%d err=%q", code, errOut)
+		}
+	})
+}
+
+func TestRun_DownloadFlagParsing(t *testing.T) {
+	dl := &stubDownloader{}
+	t.Run("--output=value form works", func(t *testing.T) {
+		dir := t.TempDir()
+		exact := filepath.Join(dir, "x.png")
+		d := &stubDownloader{}
+		if code, _, e := runWith(t, []string{"download", "--output=" + exact, assetURL}, depsWith(d)); code != 0 {
+			t.Fatalf("code=%d err=%q", code, e)
+		}
+		if d.dests[0].Exact != exact {
+			t.Fatalf("dest=%+v", d.dests)
+		}
+	})
+
+	t.Run("--output-dir=value form works", func(t *testing.T) {
+		dir := t.TempDir()
+		d := &stubDownloader{}
+		if code, _, e := runWith(t, []string{"download", "--output-dir=" + dir, assetURL}, depsWith(d)); code != 0 {
+			t.Fatalf("code=%d err=%q", code, e)
+		}
+		if d.dests[0].Dir != dir {
+			t.Fatalf("dest=%+v", d.dests)
+		}
+	})
+
+	rejected := map[string][]string{
+		"duplicate --output across forms": {"download", "--output", "a", "--output=b", assetURL},
+		"duplicate --output-dir":          {"download", "--output-dir", "a", "--output-dir", "b", assetURL},
+		"duplicate --no-clobber":          {"download", "--no-clobber", "--no-clobber", assetURL},
+		"--output missing value":          {"download", assetURL, "--output"},
+		"--output-dir missing value":      {"download", assetURL, "--output-dir"},
+		"--output empty value":            {"download", "--output=", assetURL},
+		"--output-dir empty value":        {"download", "--output-dir=", assetURL},
+		"--output in upload mode":         {"--output", "x", "a.png"},
+		"--output-dir in upload mode":     {"--output-dir", "x", "a.png"},
+		"--no-clobber in upload mode":     {"--no-clobber", "a.png"},
+		"--no-clobber with extract-token": {"--no-clobber", "extract-token"},
+	}
+	for name, args := range rejected {
+		t.Run(name, func(t *testing.T) {
+			if code, _, errOut := runWith(t, args, depsWith(dl)); code != 1 {
+				t.Fatalf("expected exit 1, got %d (stderr=%q)", code, errOut)
+			}
+		})
+	}
+
+	t.Run("a missing flag value prints the usage block", func(t *testing.T) {
+		_, _, errOut := runWith(t, []string{"download", assetURL, "--output"}, depsWith(&stubDownloader{}))
+		if !strings.Contains(errOut, "requires a value") || !strings.Contains(errOut, "Usage:") {
+			t.Fatalf("stderr lacks the usage block: %q", errOut)
+		}
+	})
+
+	t.Run("-- makes download a filename, not the subcommand", func(t *testing.T) {
+		dl := &stubDownloader{}
+		code, out, _ := runWith(t, []string{"--", "download"}, depsWith(dl))
+		if code != 0 || !strings.Contains(out, "![download](url)") {
+			t.Fatalf("code=%d out=%q — expected an upload of a file named download", code, out)
+		}
+		if len(dl.saved) != 0 {
+			t.Error("download ran despite the -- terminator")
+		}
+	})
+
+	t.Run("--token reaches the credential resolver", func(t *testing.T) {
+		var gotToken string
+		dl := &stubDownloader{}
+		d := okDeps()
+		d.newDownloader = func(tokenFlag string, stderr io.Writer) downloader {
+			gotToken = tokenFlag
+			return dl
+		}
+		runWith(t, []string{"download", "--token", "abc123", assetURL}, d)
+		if gotToken != "abc123" {
+			t.Fatalf("newDownloader saw %q", gotToken)
+		}
+	})
+
+	t.Run("credential failure surfaces per URL and exits 1", func(t *testing.T) {
+		// Credentials are resolved lazily inside the client now, so the failure
+		// arrives from Save rather than from building the downloader.
+		dl := &stubDownloader{failOn: "9f57198c"}
+		code, _, errOut := runWith(t, []string{"download", assetURL}, depsWith(dl))
+		if code != 1 || !strings.Contains(errOut, "Error downloading") {
+			t.Fatalf("code=%d err=%q", code, errOut)
+		}
+	})
+}
+
+func TestRun_HelpDocumentsDownload(t *testing.T) {
+	_, out, _ := runWith(t, []string{"--help"}, okDeps())
+	for _, want := range []string{"download", "--output", "--output-dir", "--no-clobber", "session token"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--help does not mention %q", want)
+		}
 	}
 }

@@ -2,7 +2,7 @@
 
 ## What this tool handles
 
-`gh-image` reads your GitHub `user_session` cookie from your browser's encrypted cookie store (or from an explicit token source) and uses it to authenticate against GitHub's internal image upload API.
+`gh-image` reads your GitHub `user_session` cookie from your browser's encrypted cookie store (or from an explicit token source) and uses it to authenticate against GitHub's internal attachment APIs.
 
 The cookie grants **full account access** — equivalent to your GitHub password, and not scoped like a personal access token. See the [Authentication](README.md#authentication) section of the README for full details on how the cookie is sourced and used.
 

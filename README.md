@@ -90,6 +90,18 @@ https://github.com/user-attachments/assets/…
 
 If any upload fails, the error is printed to stderr and the process exits non-zero — other files in the batch still upload.
 
+### Download
+
+```bash
+# Fetch attachments, named from the URL, into the current directory
+gh image download <url>... [--output-dir <dir>] [--no-clobber]
+
+# Or send a single attachment somewhere specific — `-` for stdout
+gh image download <url> --output <file>
+```
+
+Existing files are overwritten unless `--no-clobber` is passed, which writes `name.1`, `name.2` instead. As with upload, a failed URL is reported to stderr and the process exits non-zero — the rest of the batch still downloads.
+
 ### Pipe directly into an issue, PR, or comment
 
 From inside the repo's working directory, both `gh image` and `gh issue create` infer the target repository automatically:
@@ -153,7 +165,7 @@ A <code>demo-videos</code> skill publishes the <b>README demo reels</b> &mdash; 
 
 ## Authentication
 
-`gh-image` authenticates with credentials you already have — **nothing to provision, no OAuth scopes to configure**. Images and video going to a repository you can push to are uploaded with your `gh` CLI token; everything else — other file types, and repositories you cannot push to — falls back to your existing GitHub session, read as the `user_session` cookie from your browser's encrypted cookie store.
+`gh-image` authenticates with credentials you already have — **nothing to provision, no OAuth scopes to configure**. Images and video going to a repository you can push to are uploaded with your `gh` CLI token; everything else — other file types, and repositories you cannot push to — falls back to your existing GitHub session, read as the `user_session` cookie from your browser's encrypted cookie store. Downloads take the same two routes: the `gh` token first, your browser session as fallback.
 
 **Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari
 
