@@ -72,7 +72,7 @@ func (r *Router) Upload(owner, repo string, repoID int, path string) (*Result, e
 	// keychain prompt rather than trailing it.
 	if !r.notified {
 		r.notified = true
-		r.notify(fmt.Sprintf("Note: fast upload unavailable (%s); using browser session.", reason))
+		r.notify(fmt.Sprintf("Note: fast upload unavailable (%s); using browser session.", shortReason(reason)))
 	}
 
 	client, err := r.cookie()
@@ -116,6 +116,18 @@ func (r *Router) remember(contentType string, err error) {
 	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
 		r.disabled = err
 	}
+}
+
+// shortReason trims a rejection down to what belongs on one stderr line. The
+// endpoint's error bodies run to several hundred characters, which is useful
+// when an upload fails outright but is noise when the fallback then succeeds;
+// composeError keeps the full text for that case.
+func shortReason(err error) string {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return fmt.Sprintf("HTTP %d", status.Code)
+	}
+	return err.Error()
 }
 
 // composeError names both routes: the bearer failure is uninterpretable alone,

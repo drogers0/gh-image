@@ -316,6 +316,25 @@ func TestRouter_NoticePrecedesSessionResolution(t *testing.T) {
 	}
 }
 
+// TestRouter_NoticeOmitsResponseBody keeps the one-line notice readable: the
+// endpoint's rejection bodies run to hundreds of characters, and they belong in
+// the error returned when the fallback also fails, not on a success path.
+func TestRouter_NoticeOmitsResponseBody(t *testing.T) {
+	bearer := newBearerStub(t, refusedContentType)
+	cookie := newCookieStub(t)
+	h := routerFor(t, bearer, cookie)
+
+	if _, err := h.upload(t, writeTempFile(t, "report.pdf", "PDF")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(h.notices) != 1 {
+		t.Fatalf("notices = %v, want one", h.notices)
+	}
+	if want := "Note: fast upload unavailable (HTTP 422); using browser session."; h.notices[0] != want {
+		t.Errorf("notice = %q, want %q", h.notices[0], want)
+	}
+}
+
 // TestRouter_BothRoutesFailNamesBoth covers the diagnosability cost of removing
 // the predicate — including for a file that never attempted the fast path
 // because an earlier file already tripped the memo.
