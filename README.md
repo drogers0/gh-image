@@ -179,21 +179,21 @@ jobs:
 5. Calls back to GitHub to finalize the asset, using the finalize endpoint GitHub returns in the policy (`/upload/assets/{id}` for images, `/upload/repository-files/{id}` for other files).
 6. Prints the reference to stdout: `![name](url)` for images, the bare URL for videos (GitHub renders it as an inline player), or `[name](url)` for other files.
 
-The final URL is `https://github.com/user-attachments/assets/<uuid>` for images and `https://github.com/user-attachments/files/<id>/<name>` for other files — visibility inherits from the target repository, so a private-repo upload requires authentication to view.
+The final URL is `https://github.com/user-attachments/assets/<uuid>` for images and `https://github.com/user-attachments/files/<id>/<name>` for other files. Until it is referenced in rendered content it resolves only for the uploader, even on a public repo; once referenced, visibility follows the content that references it.
 
 For the full architecture, see **[documentation/architecture.md](documentation/architecture.md)**. For the reverse-engineered upload protocol, see **[documentation/github-image-upload-flow.md](documentation/github-image-upload-flow.md)**.
 
 ## Requirements
 
 - A supported browser with an active GitHub session — or a `GH_SESSION_TOKEN` for CI.
-- Write access to the target repository (uploads require it).
+- Read access to the target repository — write access is not required.
 - A target repository — pass `--repo owner/repo`, or run from a git workspace whose `origin` remote is on GitHub.
 - The `gh` CLI must be installed and authenticated (used for repository ID lookup).
 
 ## Limitations
 
 - Uses an **undocumented** internal GitHub API that may change without notice.
-- `uploadToken` is only issued to users with write access on the target repository.
+- `uploadToken` is usually present on repository pages for any user who can view the repo. An invalid or expired session is the case where it is absent.
 - Session cookies are not scoped credentials; they expire when GitHub invalidates the session.
 
 ## Contributing

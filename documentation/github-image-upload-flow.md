@@ -211,7 +211,7 @@ Each step produces the token needed for the next GitHub-authenticated step. The 
 ## Caveats
 
 - This is an undocumented internal API. It could change without notice.
-- The `uploadToken` is only present on repository pages when the authenticated user has write access.
+- The `uploadToken` is usually present on repository pages for any user who can view the repo. An invalid or expired `user_session` is the case where it is absent.
 - The `repository_id` must correspond to a repo the user has access to.
 - The presigned S3 policy has an expiration window (observed ~30 minutes).
 - File size in the policy request must match the actual file size exactly.
