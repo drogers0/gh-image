@@ -1,20 +1,10 @@
 package cookies
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
-
-	"github.com/browserutils/kooky"
-	_ "github.com/browserutils/kooky/browser/brave"
-	_ "github.com/browserutils/kooky/browser/chrome"
-	_ "github.com/browserutils/kooky/browser/chromium"
-	_ "github.com/browserutils/kooky/browser/edge"
-	_ "github.com/browserutils/kooky/browser/firefox"
-	_ "github.com/browserutils/kooky/browser/opera"
-	_ "github.com/browserutils/kooky/browser/safari"
 )
 
 // NewSessionCookie builds a github.com user_session cookie from a raw value.
@@ -32,9 +22,11 @@ func NewSessionCookie(value string) *http.Cookie {
 }
 
 // rawCookie is a github.com cookie reduced to the fields selection needs,
-// decoupled from kooky so the selection logic is unit-testable.
+// decoupled from the provider so the selection logic is unit-testable. Providers
+// (see provider_kooky.go / provider_hbd.go, selected by build tag) read the real
+// browser stores and hand back a slice of these.
 type rawCookie struct {
-	store  string // FilePath()+"\x00"+Container — identifies one cookie store
+	store  string // provider store key — identifies one cookie store (profile/container)
 	domain string
 	name   string
 	value  string
@@ -54,39 +46,18 @@ const noSessionMsg = "no github.com user_session cookie found in any supported "
 	"cookie manually, or log into GitHub in Chrome, Chromium, Edge, Firefox, " +
 	"Brave, Opera, or Safari."
 
-// browserReadHints maps a substring that may appear in a browser-read error to
-// actionable guidance. Matching is by substring, not errors.Is: the triggering
-// strings originate outside our code and are not exported sentinels —
-//   - "decryption failed" is a bare errors.New from kooky, confirmed present in
-//     v0.2.10 (browserutils/kooky/internal/chrome/chrome.go). Re-verify on bump.
-//   - "being used by another process" is the Windows sharing-violation OS string,
-//     taken verbatim from the captured output in issue #5. NOTE: this text is
-//     locale-dependent — non-English Windows won't match, which degrades to no
-//     hint (never a wrong hint), consistent with the wrap-not-replace rule below.
-//
-// We append hints rather than replace the error, so an upstream/OS wording change
-// degrades to the raw error instead of a wrong message. See issues #4 and #5.
-var browserReadHints = []struct{ match, hint string }{
-	{
-		match: "being used by another process",
-		hint: "A running browser is locking its cookie database. Close the " +
-			"browser completely and try again, or set GH_SESSION_TOKEN to supply " +
-			"the cookie manually.",
-	},
-	{
-		match: "decryption failed",
-		hint: "A Chromium browser (Chrome 127+, Edge, Brave, or Opera) is blocking " +
-			"cookie decryption with App-Bound Encryption. Copy the github.com " +
-			"user_session cookie value from that browser's DevTools " +
-			"(F12 > Application > Cookies > github.com > user_session) and set " +
-			"GH_SESSION_TOKEN to it.",
-	},
-}
+// readHint maps a substring that may appear in a browser-read error to actionable
+// guidance. The trigger strings originate outside our code (provider/OS), so
+// matching is by substring, not errors.Is. The concrete set lives in the active
+// provider file (browserReadHints), since the strings are provider-specific.
+type readHint struct{ match, hint string }
 
 // annotateReadError wraps a browser-read error as "reading browser cookies" and
 // appends any actionable hints whose trigger substring is present. Pure and
 // unit-testable; the wrapping matches the previous inline behavior when no hint
-// matches. Precondition: err is non-nil (callers only invoke it on a read error).
+// matches. We append rather than replace, so an upstream/OS wording change
+// degrades to the raw error instead of a wrong message. Precondition: err is
+// non-nil (callers only invoke it on a read error).
 func annotateReadError(err error) error {
 	wrapped := fmt.Errorf("reading browser cookies: %w", err)
 	var hints []string
@@ -100,42 +71,6 @@ func annotateReadError(err error) error {
 		return wrapped
 	}
 	return fmt.Errorf("%w\nhint: %s", wrapped, strings.Join(hints, "\nhint: "))
-}
-
-// readRawCookies reads every valid github.com cookie across all supported
-// browsers/profiles and reduces each to a rawCookie. It is the only part of
-// selection that touches the real browser stores, so it is kept thin; the
-// ranking logic lives in the pure functions below.
-func readRawCookies() ([]rawCookie, error) {
-	ctx := context.Background()
-
-	// No Name filter: we need logged_in alongside user_session to tell an active
-	// session from a stale logged-out one in the same store.
-	kcookies, err := kooky.ReadCookies(ctx,
-		kooky.Valid,
-		kooky.DomainHasSuffix("github.com"),
-	)
-	return mapKookyCookies(kcookies), err
-}
-
-// mapKookyCookies reduces kooky cookies to the fields selection needs. It is split
-// from readRawCookies so the (pure) store-key derivation is unit-testable without
-// touching real browser stores.
-func mapKookyCookies(kcookies []*kooky.Cookie) []rawCookie {
-	out := make([]rawCookie, 0, len(kcookies))
-	for _, c := range kcookies {
-		store := c.Container
-		if c.Browser != nil {
-			store = c.Browser.FilePath() + "\x00" + c.Container
-		}
-		out = append(out, rawCookie{
-			store:  store,
-			domain: c.Domain,
-			name:   c.Name,
-			value:  c.Value,
-		})
-	}
-	return out
 }
 
 // groupCandidates buckets raw cookies by store and produces one candidate per
@@ -164,8 +99,8 @@ func groupCandidates(raw []rawCookie) []sessionCandidate {
 		case "user_session":
 			// A store essentially never holds two user_session cookies; if it
 			// does, last-seen wins. There's no reliable recency signal to prefer
-			// one (kooky derives Creation from the SQLite rowid on Chromium), and
-			// the final pick across stores is made deterministic in selectSession.
+			// one, and the final pick across stores is made deterministic in
+			// selectSession.
 			s.session = c
 		case "logged_in":
 			if c.value == "yes" {
@@ -218,7 +153,7 @@ func selectSession(cands []sessionCandidate, validate func(*http.Cookie) error) 
 	if len(pool) == 0 {
 		pool = append([]sessionCandidate(nil), cands...)
 	}
-	// Order by store key for a stable pick across runs (kooky's discovery order
+	// Order by store key for a stable pick across runs (provider discovery order
 	// is nondeterministic). There is no trustworthy recency signal to prefer one
 	// store over another, so this order is arbitrary-but-deterministic; when it
 	// matters (2+ live candidates) validation, not ordering, makes the choice.
@@ -239,12 +174,12 @@ func selectSession(cands []sessionCandidate, validate func(*http.Cookie) error) 
 }
 
 // chooseSession turns a raw cookie read (and any read error) into the selected
-// session cookie. Splitting this from readRawCookies keeps the kooky browser read
-// the only part of the package that isn't unit-testable.
+// session cookie. Splitting this from readRawCookies keeps the provider browser
+// read the only part of the package that isn't unit-testable.
 func chooseSession(raw []rawCookie, readErr error, validate func(*http.Cookie) error) (*http.Cookie, error) {
 	cands := groupCandidates(raw)
 	if len(cands) == 0 {
-		// kooky reports errors for absent browsers/profiles alongside cookies
+		// Providers report errors for absent browsers/profiles alongside cookies
 		// from present ones; only surface the read error if nothing usable came back.
 		if readErr != nil {
 			return nil, annotateReadError(readErr)
@@ -256,7 +191,8 @@ func chooseSession(raw []rawCookie, readErr error, validate func(*http.Cookie) e
 
 // GetGitHubSession returns the best github.com user_session cookie found across
 // supported browsers. When more than one logged-in candidate exists, validate
-// is used to pick a live one; pass nil to skip network validation.
+// is used to pick a live one; pass nil to skip network validation. The browser
+// read itself is delegated to the build-tag-selected provider's readRawCookies.
 func GetGitHubSession(validate func(*http.Cookie) error) (*http.Cookie, error) {
 	raw, err := readRawCookies()
 	return chooseSession(raw, err, validate)
