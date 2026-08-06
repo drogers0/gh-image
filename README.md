@@ -151,9 +151,7 @@ A <code>demo-videos</code> skill publishes the <b>README demo reels</b> &mdash; 
 
 ## Authentication
 
-`gh-image` authenticates with your existing GitHub session — **no tokens to provision, no OAuth scopes to configure** for everyday local use. The tool reads the `user_session` cookie from your browser's encrypted cookie store.
-
-Images and video going to a repository you can push to are uploaded with your `gh` CLI token instead, and never touch the browser cookie store. Everything else — other file types, and repositories you cannot push to — uses the session below.
+`gh-image` authenticates with credentials you already have — **nothing to provision, no OAuth scopes to configure**. Images and video going to a repository you can push to are uploaded with your `gh` CLI token; everything else — other file types, and repositories you cannot push to — falls back to your existing GitHub session, read as the `user_session` cookie from your browser's encrypted cookie store.
 
 **Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari
 
@@ -166,7 +164,7 @@ On macOS, a Keychain prompt may appear on first use to authorize access to your 
 
 ### Session token override
 
-For CI, headless environments, or shared machines, you can supply the session token explicitly. Doing so also pins every upload to the browser-session flow, so the account it names is the account that uploads. Resolution order (first match wins):
+For CI, headless environments, or shared machines, you can supply the session token explicitly. Resolution order (first match wins):
 
 | Priority | Source | When to use |
 |---|---|---|
@@ -237,7 +235,7 @@ For the full architecture, see **[documentation/architecture.md](documentation/a
 
 ## Requirements
 
-- A supported browser with an active GitHub session — or a `GH_SESSION_TOKEN` for CI. Needed for files other than images and video, and for repositories you cannot push to.
+- A supported browser with an active GitHub session — or a `GH_SESSION_TOKEN` for CI.
 - Read access to the target repository — write access is not required.
 - A target repository — pass `--repo owner/repo`, or run from a git workspace whose `origin` remote is on GitHub.
 - The `gh` CLI must be installed and authenticated (used for repository ID lookup).
