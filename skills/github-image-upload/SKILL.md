@@ -57,10 +57,9 @@ Check these first. Report failures — do not install or authenticate for the us
    browser (Chrome/Brave/Chromium/Edge/Firefox/Opera/Safari — the local default;
    macOS may prompt for Keychain access, click **Always Allow**).
 
-   That cookie grants **full account access** — GitHub offers nothing narrower here
-   ([why](https://github.com/drogers0/gh-image/blob/main/SECURITY.md)). Never print,
-   log, or store its value; prefer `GH_SESSION_TOKEN` over `--token`, which is visible
-   in `ps aux`.
+   That cookie grants **full account access** — it is not scoped like a PAT, and
+   GitHub offers nothing narrower for this endpoint. Never print, log, or store its
+   value; prefer `GH_SESSION_TOKEN` over `--token`, which is visible in `ps aux`.
 
 ## Step 1 — Resolve the path
 

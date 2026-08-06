@@ -110,7 +110,7 @@ Happens consistently after the third click."
 npx skills add drogers0/gh-image
 ```
 
-The open [Agent Skills standard](https://agentskills.io/clients) is supported by **Claude Code**, **OpenAI Codex**, **Cursor**, **GitHub Copilot**, and [many more](https://agentskills.io/clients). The skill checks that this extension is present (asking you to install it if not), runs the upload, and embeds the resulting `user-attachments` URL into a PR, issue, or comment. It never installs anything on your behalf — see [SECURITY.md](SECURITY.md#automated-scan-findings) for the reasoning.
+The open [Agent Skills standard](https://agentskills.io/clients) is supported by **Claude Code**, **OpenAI Codex**, **Cursor**, **GitHub Copilot**, and [many more](https://agentskills.io/clients). The skill checks that this extension is present (asking you to install it if not), runs the upload, and embeds the resulting `user-attachments` URL into a PR, issue, or comment. It never installs anything on your behalf.
 
 ## Who's using gh-image
 
