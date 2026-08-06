@@ -179,21 +179,21 @@ jobs:
 5. Calls back to GitHub to finalize the asset, using the finalize endpoint GitHub returns in the policy (`/upload/assets/{id}` for images, `/upload/repository-files/{id}` for other files).
 6. Prints the reference to stdout: `![name](url)` for images, the bare URL for videos (GitHub renders it as an inline player), or `[name](url)` for other files.
 
-The final URL is `https://github.com/user-attachments/assets/<uuid>` for images and `https://github.com/user-attachments/files/<id>/<name>` for other files — visibility inherits from the target repository, so a private-repo upload requires authentication to view.
+The final URL is `https://github.com/user-attachments/assets/<uuid>` for images and `https://github.com/user-attachments/files/<id>/<name>` for other files. Until the URL is referenced in rendered content (an issue, PR, comment, or file), it resolves only for the uploader — even on a public repo. Once referenced, visibility follows the content that references it, so a private-repo upload still requires authentication to view.
 
 For the full architecture, see **[documentation/architecture.md](documentation/architecture.md)**. For the reverse-engineered upload protocol, see **[documentation/github-image-upload-flow.md](documentation/github-image-upload-flow.md)**.
 
 ## Requirements
 
 - A supported browser with an active GitHub session — or a `GH_SESSION_TOKEN` for CI.
-- Write access to the target repository (uploads require it).
+- Read access to the target repository — write access is not required (uploading mirrors dragging a file into a comment box).
 - A target repository — pass `--repo owner/repo`, or run from a git workspace whose `origin` remote is on GitHub.
 - The `gh` CLI must be installed and authenticated (used for repository ID lookup).
 
 ## Limitations
 
 - Uses an **undocumented** internal GitHub API that may change without notice.
-- `uploadToken` is only issued to users with write access on the target repository.
+- `uploadToken` is only present on repository pages the session can actually load; an invalid or expired session gets GitHub's sign-in page instead, at HTTP 200.
 - Session cookies are not scoped credentials; they expire when GitHub invalidates the session.
 
 ## Contributing

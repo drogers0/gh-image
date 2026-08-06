@@ -83,6 +83,53 @@ func TestIsSAMLProtected(t *testing.T) {
 	}
 }
 
+func TestIsSignInInterstitial(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "sign-in interstitial served for an invalid session",
+			body: `<title>Sign in to GitHub · GitHub</title><form action="/session">`,
+			want: true,
+		},
+		{
+			// The real repo page always embeds currentUser, as null when the
+			// request carries no session at all.
+			name: "anonymous repo page must NOT match",
+			body: `<title>GitHub - octocat/hello: hi</title>{"currentUser":null}`,
+			want: false,
+		},
+		{
+			name: "signed-in repo page must NOT match",
+			body: `<title>GitHub - octocat/hello: hi</title>{"currentUser":{"login":"octocat"}}`,
+			want: false,
+		},
+		{
+			// A repo whose description mentions signing in: the real title starts
+			// with "GitHub - <owner>/<repo>", so the anchored match cannot fire.
+			name: "repo about signing in must NOT match",
+			body: `<title>GitHub - acme/auth: Sign in to GitHub from the CLI</title>`,
+			want: false,
+		},
+		{
+			// The org SSO interstitial is a different failure with a different fix;
+			// it must fall through to isSAMLProtected.
+			name: "SAML interstitial must NOT match",
+			body: `<title>Sign in to GymPod</title><a href="/orgs/GymPod/sso">x</a>`,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isSignInInterstitial([]byte(tc.body)); got != tc.want {
+				t.Errorf("isSignInInterstitial(%q) = %v, want %v", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetUploadToken(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -100,17 +147,33 @@ func TestGetUploadToken(t *testing.T) {
 			wantToken: "TKN123",
 		},
 		{
-			name:        "SAML interstitial gives an actionable SSO error, not write-access",
+			name:        "SAML interstitial gives an actionable SSO error, not an access error",
 			owner:       "GymPod",
 			body:        `<title>Sign in to GymPod</title><a href="/orgs/GymPod/sso">Single sign-on</a>`,
-			errContains: []string{"SAML SSO", "/orgs/GymPod/sso", "Write access alone is not enough"},
-			errExcludes: []string{"do you have write access to GymPod"},
+			errContains: []string{"SAML SSO", "/orgs/GymPod/sso", "Repository access alone is not enough"},
+			errExcludes: []string{"can you view GymPod"},
 		},
 		{
-			name:        "no token and no SSO markers gives the generic message",
+			name:        "expired session gives a re-extract error, not an access error",
+			owner:       "octocat",
+			body:        `<title>Sign in to GitHub · GitHub</title>`,
+			errContains: []string{"invalid or expired", "gh image extract-token"},
+			errExcludes: []string{"can you view octocat/hello", "SAML"},
+		},
+		{
+			// Owner "github" makes the sign-in title satisfy isSAMLProtected too;
+			// the stale-session branch must still win.
+			name:        "expired session on a github-owned repo is not reported as SSO",
+			owner:       "github",
+			body:        `<title>Sign in to GitHub · GitHub</title>`,
+			errContains: []string{"invalid or expired"},
+			errExcludes: []string{"SAML"},
+		},
+		{
+			name:        "no token and no interstitial markers gives the generic message",
 			owner:       "octocat",
 			body:        `<html>just a page, no token</html>`,
-			errContains: []string{"do you have write access to octocat/hello"},
+			errContains: []string{"can you view octocat/hello"},
 		},
 		{
 			name:        "non-200 status reports the repo page status",
