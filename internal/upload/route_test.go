@@ -244,15 +244,21 @@ func TestRouter_TransientFailuresAreRetried(t *testing.T) {
 func TestRouter_BearerBuildFailure(t *testing.T) {
 	bearer := newBearerStub(t, created("https://gh/assets/unused"))
 	cookie := newCookieStub(t)
-	h := routerFor(t, bearer, cookie)
 	builds := 0
-	h.router.newBearer = func() (*BearerClient, error) {
-		builds++
-		return nil, fmt.Errorf("gh auth token: not logged in")
-	}
+	var notices []string
+	router := NewRouter(
+		func() (*BearerClient, error) {
+			builds++
+			return nil, fmt.Errorf("gh auth token: not logged in")
+		},
+		func() (*Client, error) {
+			return &Client{http: cookie.server.Client(), baseURL: cookie.server.URL}, nil
+		},
+		func(msg string) { notices = append(notices, msg) },
+	)
 
 	for _, name := range []string{"one.png", "two.png"} {
-		if _, err := h.upload(t, writeTempFile(t, name, "PNG")); err != nil {
+		if _, err := router.Upload("octo", "hello", 42, writeTempFile(t, name, "PNG")); err != nil {
 			t.Fatalf("%s: unexpected error: %v", name, err)
 		}
 	}
@@ -262,8 +268,8 @@ func TestRouter_BearerBuildFailure(t *testing.T) {
 	if got := bearer.calls.Load(); got != 0 {
 		t.Errorf("bearer attempted %d times, want 0", got)
 	}
-	if len(h.notices) != 1 || !strings.Contains(h.notices[0], "not logged in") {
-		t.Errorf("notices = %v, want one naming the gh failure", h.notices)
+	if len(notices) != 1 || !strings.Contains(notices[0], "not logged in") {
+		t.Errorf("notices = %v, want one naming the gh failure", notices)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // Router uploads through the bearer endpoint when it can and the
@@ -19,17 +20,16 @@ import (
 // would push every remaining file onto the cookie route, and its keychain
 // prompt, over a blip.
 type Router struct {
-	newBearer func() (*BearerClient, error) // nil when an explicit session token pins the cookie route
-	newCookie func() (*Client, error)
-	notify    func(string)
+	// Both constructors are memoized, so the gh token is fetched once and the
+	// browser session resolved once, however many files a run holds. Only
+	// construction is memoized: each file still gets its own upload attempt.
+	bearer func() (*BearerClient, error) // nil when an explicit session token pins the cookie route
+	cookie func() (*Client, error)
+	notify func(string)
 
-	bearer   *BearerClient
 	rejected map[string]error // content type -> why the endpoint refused it
 	disabled error            // non-nil once the bearer route is off for the run
-
-	cookie    *Client
-	cookieErr error
-	notified  bool
+	notified bool
 }
 
 // errExplicitSessionToken disables the bearer route when the user named the
@@ -38,13 +38,14 @@ var errExplicitSessionToken = errors.New("explicit session token supplied")
 
 func NewRouter(newBearer func() (*BearerClient, error), newCookie func() (*Client, error), notify func(string)) *Router {
 	r := &Router{
-		newBearer: newBearer,
-		newCookie: newCookie,
-		notify:    notify,
-		rejected:  map[string]error{},
+		cookie:   sync.OnceValues(newCookie),
+		notify:   notify,
+		rejected: map[string]error{},
 	}
 	if newBearer == nil {
 		r.disabled = errExplicitSessionToken
+	} else {
+		r.bearer = sync.OnceValues(newBearer)
 	}
 	return r
 }
@@ -74,16 +75,14 @@ func (r *Router) Upload(owner, repo string, repoID int, path string) (*Result, e
 		r.notify(fmt.Sprintf("Note: fast upload unavailable (%s); using browser session.", reason))
 	}
 
-	if r.cookie == nil && r.cookieErr == nil {
-		r.cookie, r.cookieErr = r.newCookie()
-	}
-	if r.cookieErr != nil {
-		return nil, composeError(reason, r.cookieErr)
+	client, err := r.cookie()
+	if err != nil {
+		return nil, composeError(reason, err)
 	}
 
-	// Only client construction is memoized: every file gets its own attempt, so
-	// one flaky upload does not poison the rest of the run.
-	result, err := r.cookie.Upload(owner, repo, repoID, path)
+	// One flaky upload must not poison the rest of the run, so the per-file
+	// result is never folded back into the memoized construction.
+	result, err := client.Upload(owner, repo, repoID, path)
 	if err != nil {
 		return nil, composeError(reason, err)
 	}
@@ -92,16 +91,13 @@ func (r *Router) Upload(owner, repo string, repoID int, path string) (*Result, e
 
 // tryBearer builds the bearer client on first use and attempts the upload.
 func (r *Router) tryBearer(repoID int, path string) (*Result, error) {
-	if r.bearer == nil {
-		bearer, err := r.newBearer()
-		if err != nil {
-			// gh auth token will not start succeeding mid-run.
-			r.disabled = err
-			return nil, err
-		}
-		r.bearer = bearer
+	client, err := r.bearer()
+	if err != nil {
+		// gh auth token will not start succeeding mid-run.
+		r.disabled = err
+		return nil, err
 	}
-	return r.bearer.Upload(repoID, path)
+	return client.Upload(repoID, path)
 }
 
 // remember records a failure only when it says something durable. A 422 naming

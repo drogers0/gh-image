@@ -519,6 +519,29 @@ func TestResolveSessionCookie_NilGetter(t *testing.T) {
 	}
 }
 
+// TestUseBearerRoute covers the rule that keeps an explicitly named account
+// from being silently overridden by the gh identity.
+func TestUseBearerRoute(t *testing.T) {
+	tests := []struct {
+		name      string
+		tokenFlag string
+		envToken  string
+		want      bool
+	}{
+		{"no session token supplied", "", "", true},
+		{"--token flag pins the session flow", "tok", "", false},
+		{"GH_SESSION_TOKEN pins the session flow", "", "envtok", false},
+		{"both supplied", "tok", "envtok", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := useBearerRoute(tc.tokenFlag, tc.envToken); got != tc.want {
+				t.Errorf("useBearerRoute(%q, %q) = %v, want %v", tc.tokenFlag, tc.envToken, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestProductionDeps_WiringComplete(t *testing.T) {
 	d := productionDeps()
 	if d.resolveRepo == nil || d.newUploader == nil || d.extractToken == nil || d.checkToken == nil {

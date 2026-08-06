@@ -51,11 +51,8 @@ func productionDeps() deps {
 	return deps{
 		resolveRepo: repo.Resolve,
 		newUploader: func(tokenFlag string, stderr io.Writer) uploadFunc {
-			// An explicitly supplied session token names the account that uploads;
-			// the bearer route authenticates as whoever gh is, so honoring that
-			// choice means staying on the cookie route for every file.
 			var newBearer func() (*upload.BearerClient, error)
-			if tokenFlag == "" && os.Getenv(sessionTokenEnvVar) == "" {
+			if useBearerRoute(tokenFlag, os.Getenv(sessionTokenEnvVar)) {
 				newBearer = func() (*upload.BearerClient, error) {
 					token, err := upload.GHAuthToken()
 					if err != nil {
@@ -338,6 +335,16 @@ func resolveSessionCookie(tokenFlag string) (*http.Cookie, string, error) {
 		})
 	}
 	return resolveSessionCookieWithGetter(tokenFlag, os.Getenv(sessionTokenEnvVar), get)
+}
+
+// useBearerRoute reports whether uploads may take the gh-token fast path.
+// An explicitly supplied session token names the account that uploads, and the
+// bearer route authenticates as whoever gh is, so honoring that choice means
+// staying on the browser-session flow for every file. The inputs mirror
+// resolveSessionCookieWithGetter's first two, so the two decisions read from
+// the same sources.
+func useBearerRoute(tokenFlag, envToken string) bool {
+	return tokenFlag == "" && envToken == ""
 }
 
 // resolveSessionCookieWithGetter is a testable variant of resolveSessionCookie
