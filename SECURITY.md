@@ -24,17 +24,17 @@ The [agent skill](skills/github-image-upload/SKILL.md) is scanned by third-party
 
 | Finding | Resolution |
 |---|---|
-| `REMOTE_CODE_EXECUTION`, `EXTERNAL_DOWNLOADS`, Snyk `W012` | The skill no longer installs the extension. It detects, and directs the user to install. Release binaries carry [build provenance attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations), verifiable with `gh attestation verify <file> --owner drogers0`. |
+| `REMOTE_CODE_EXECUTION`, `EXTERNAL_DOWNLOADS`, Snyk `W012` | **Primary control:** the skill no longer installs the extension — it detects presence and a version floor, then directs the user to install. **Additional:** release binaries carry [build provenance attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations), verifiable with `gh attestation verify <file> --owner drogers0`. Verification is opt-in and requires downloading the binary first; `gh extension install` does not check attestations. |
 | `COMMAND_EXECUTION` | The skill declares an `allowed-tools` allowlist naming only the `gh` subcommands it needs. `gh extension install` is deliberately excluded. Enforcement is host-dependent — hosts that ignore `allowed-tools` get no restriction from it. |
-| `PROMPT_INJECTION` (partial) | PR and issue bodies are untrusted. The documented workflow keeps them in a shell variable and pipes them, so body text never enters the agent's context; where a body must be read, the skill requires boundary markers around it. |
+| `PROMPT_INJECTION` (partial) | PR and issue bodies are untrusted. Every documented command keeps a body inside the shell pipeline, and the verify step counts URL matches instead of printing the body, so no documented step returns body text to the agent. The skill instructs against decomposing those pipelines, and requires boundary markers if a body is read anyway. |
 
 ### Accepted
 
 | Finding | Why it stands |
 |---|---|
 | `DATA_EXFILTRATION` | Uploading local files to GitHub is what the tool does. It is mitigated — the skill confirms the destination repo before uploading and stops rather than guessing an ambiguous path — but not removable without removing the tool. |
-| `CREDENTIALS_UNSAFE` | GitHub supports exactly one credential here (above). Reading the browser cookie store stays the local default because the alternative pushes an unscoped, password-equivalent token into shell history and dotfiles — worse placement than the OS keychain it came from. `GH_SESSION_TOKEN` remains available for anyone who prefers to manage it explicitly. |
-| `PROMPT_INJECTION` (residual) | The read-modify-write of a PR body uses stock `gh` commands by design. Moving that logic into `gh-image` would eliminate the round-trip, at the cost of making this a tool that mutates GitHub objects rather than one that prints a URL. Not a trade we are making. |
+| `CREDENTIALS_UNSAFE` | GitHub supports exactly one credential here (above), and it is unscoped. What is left is where it lives. Browser cookie store (local default) leaves it in the OS keychain it already occupies — no new copy. `GH_SESSION_TOKEN` (recommended for CI and shared machines) keeps it out of `ps aux` and shell history. The `--token` flag is visible in `ps aux`; the skill tells agents not to use it. Both defaults are reasonable placements, but the credential's blast radius is GitHub's to fix, not ours. |
+| `PROMPT_INJECTION` (residual) | Appending to a PR *description* requires reading the existing body. The documented command keeps it in the shell pipeline, but anyone who decomposes that command — or reads a body for any other reason — puts attacker-controlled text in front of the agent. Eliminating the round-trip would mean moving read-modify-write into `gh-image`, making it a tool that mutates GitHub objects rather than one that prints a URL. Not a trade we are making. The comment path, which never reads a body, is documented as the preferred default. |
 
 ## Reporting a vulnerability
 
