@@ -25,6 +25,8 @@ allowed-tools:
   - Bash(gh issue edit:*)
   - Bash(gh issue comment:*)
   - Bash(printf:*)
+  - Bash(grep:*)
+  - Bash(cat:*)
 ---
 
 # Upload images and files to GitHub (gh-image)
@@ -63,7 +65,7 @@ do not install or authenticate on their behalf.**
    ```
 
    `gh image --version` prints `gh-image <version>` (e.g. `gh-image 1.2.0`); compare
-   the part after the space.
+   the part after the space semantically, not as a string (`1.10.0` ≥ `1.1.0`).
 
    | Result | Action |
    |---|---|
@@ -76,12 +78,14 @@ do not install or authenticate on their behalf.**
 
 3. **A GitHub session for the upload.** `gh-image` does NOT use the `gh` token for
    the upload (that endpoint rejects tokens); it needs the browser `user_session`
-   cookie. Resolution order (first match wins):
-   - `--token <value>` flag, or
-   - `GH_SESSION_TOKEN` env var (use this in CI / headless), or
+   cookie, from one of:
+   - `GH_SESSION_TOKEN` env var — use this in CI / headless, or
    - the cookie store of a logged-in browser (Chrome/Brave/Chromium/Edge/Firefox/
      Opera/Safari) — the default for local use. On macOS the first read may show a
      Keychain prompt; the user should click **Always Allow**.
+
+   A `--token <value>` flag takes priority over both, but exposes the token in
+   `ps aux` — do not use it.
 
 ## Credential handling
 
@@ -157,14 +161,13 @@ printf '## Screenshots\n\n%s\n' \
 **Append to a PR description** — only when the user asked for the description
 specifically. This one does read the existing body, so keep it in the pipeline.
 
-A failing `$(gh pr view …)` expands to an empty string rather than aborting, which
-would make `gh pr edit` **replace** the description instead of appending to it. The
-leading check aborts first; it reads only the PR number, never the body:
+Fetch the body to a file first. A command substitution that fails expands to an
+empty string without aborting, and `gh pr edit` would then **replace** the
+description instead of appending to it; `&&` on the fetch makes that impossible:
 
 ```bash
-gh pr view <pr> --repo owner/repo --json number -q .number > /dev/null \
-  && printf '%s\n\n## Screenshots\n\n%s\n' \
-       "$(gh pr view <pr> --repo owner/repo --json body -q .body)" \
+gh pr view <pr> --repo owner/repo --json body -q .body > /tmp/pr-body.md \
+  && printf '%s\n\n## Screenshots\n\n%s\n' "$(cat /tmp/pr-body.md)" \
        '![shot.png](https://github.com/user-attachments/assets/<uuid>)' \
      | gh pr edit <pr> --repo owner/repo --body-file -
 ```
@@ -187,12 +190,19 @@ UNTRUSTED_BODY
 ## Step 4 — Verify
 
 Count the attachment URLs rather than printing the body — same reason as Step 3.
-Expect at least 1:
+This searches the description and the comments together, so it works whichever path
+you took in Step 3. Expect at least 1:
 
 ```bash
-gh pr view <pr> --repo owner/repo --json body -q .body | grep -c 'user-attachments'
-gh issue view <n> --repo owner/repo --json body -q .body | grep -c 'user-attachments'
+gh pr view <pr> --repo owner/repo --json body,comments \
+  -q '[.body] + [.comments[].body] | join("\n")' | grep -c 'user-attachments'
+
+gh issue view <n> --repo owner/repo --json body,comments \
+  -q '[.body] + [.comments[].body] | join("\n")' | grep -c 'user-attachments'
 ```
+
+A count of 0 means the embed did not land. Report that — do not re-run `gh image`,
+which would upload the file again.
 
 The `user-attachments` URL inherits the repo's visibility, so on a **private** repo
 it renders only for authorized viewers (an anonymous fetch returns 404/403 — that is
