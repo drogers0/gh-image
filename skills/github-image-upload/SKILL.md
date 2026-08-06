@@ -139,6 +139,9 @@ repo the URL renders only for authorized viewers; an anonymous 404/403 is expect
 
 ## Sizing (optional)
 
+To control display size, embed this **instead of** the bare markdown, not alongside
+it — both would render the image twice:
+
 ```html
 <img width="800" alt="screenshot" src="https://github.com/user-attachments/assets/<uuid>" />
 ```
