@@ -127,9 +127,8 @@ To control display size, embed an HTML tag instead of the bare markdown:
 
 | Symptom | Cause / fix |
 |---|---|
-| `<org> enforces SAML SSO and your session is not authorized…` | The org requires SSO and your session isn't authorized. Open the `https://github.com/orgs/<org>/sso` URL from the message in a browser, authorize (lasts ~24h), then retry. Repository access alone is not enough — this is not a permissions problem. |
-| `GitHub served its sign-in page — your session token is invalid or expired` | The `user_session` value is stale. Re-run `gh image extract-token`, or refresh the `GH_SESSION_TOKEN` secret in CI, then retry. Not a permissions problem. |
-| `uploadToken not found … can you view <owner>/<repo>?` | The generic no-token case. Confirm the repo exists and you can view it — read access is enough, write access is not required; if the repo's org uses SSO, authorize at `https://github.com/orgs/<org>/sso` (the message includes this hint) and retry. |
+| `<org> enforces SAML SSO and your session is not authorized…` | The org requires SSO and your session isn't authorized. Open the `https://github.com/orgs/<org>/sso` URL from the message in a browser, authorize (lasts ~24h), then retry. Write access alone is not enough — this is not a permissions problem. |
+| `uploadToken not found … do you have write access?` | The generic no-token case. Confirm you have write access; if the repo's org uses SSO, authorize at `https://github.com/orgs/<org>/sso` (the message includes this hint) and retry. |
 | No `user_session` cookie found | Log into GitHub in a supported browser, or set `GH_SESSION_TOKEN`. |
 | Windows + Chrome 127+ can't read cookies | Known cookie-library limitation — use another browser or `GH_SESSION_TOKEN`. |
 | CI / headless run | Set `GH_SESSION_TOKEN` (dedicated bot account); the browser cookie path won't exist. |

@@ -98,7 +98,7 @@ func (c *Client) getUploadToken(owner, repo string) (string, error) {
 				"authorize in a browser at https://github.com/orgs/%s/sso (lasts ~24h), then retry. "+
 				"Repository access alone is not enough", owner, owner)
 		}
-		return "", fmt.Errorf("uploadToken not found on repo page — can you view %s/%s? "+
+		return "", fmt.Errorf("uploadToken not found on repo page — you may not have upload access to %s/%s "+
 			"(or, if %s enforces SAML SSO, authorize at https://github.com/orgs/%s/sso)",
 			owner, repo, owner, owner)
 	}

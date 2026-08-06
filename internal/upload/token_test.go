@@ -151,14 +151,14 @@ func TestGetUploadToken(t *testing.T) {
 			owner:       "GymPod",
 			body:        `<title>Sign in to GymPod</title><a href="/orgs/GymPod/sso">Single sign-on</a>`,
 			errContains: []string{"SAML SSO", "/orgs/GymPod/sso", "Repository access alone is not enough"},
-			errExcludes: []string{"can you view GymPod"},
+			errExcludes: []string{"you may not have upload access"},
 		},
 		{
 			name:        "expired session gives a re-extract error, not an access error",
 			owner:       "octocat",
 			body:        `<title>Sign in to GitHub · GitHub</title>`,
 			errContains: []string{"invalid or expired", "gh image extract-token"},
-			errExcludes: []string{"can you view octocat/hello", "SAML"},
+			errExcludes: []string{"you may not have upload access to octocat/hello", "SAML"},
 		},
 		{
 			// Owner "github" makes the sign-in title satisfy isSAMLProtected too;
@@ -173,7 +173,7 @@ func TestGetUploadToken(t *testing.T) {
 			name:        "no token and no interstitial markers gives the generic message",
 			owner:       "octocat",
 			body:        `<html>just a page, no token</html>`,
-			errContains: []string{"can you view octocat/hello"},
+			errContains: []string{"you may not have upload access to octocat/hello"},
 		},
 		{
 			name:        "non-200 status reports the repo page status",
