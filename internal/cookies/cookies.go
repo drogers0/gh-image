@@ -7,9 +7,13 @@ import (
 	"sort"
 	"strings"
 
+	"os"
+	"path/filepath"
+	"runtime"
+
 	"github.com/browserutils/kooky"
 	_ "github.com/browserutils/kooky/browser/brave"
-	_ "github.com/browserutils/kooky/browser/chrome"
+	chromebrowser "github.com/browserutils/kooky/browser/chrome"
 	_ "github.com/browserutils/kooky/browser/chromium"
 	_ "github.com/browserutils/kooky/browser/edge"
 	_ "github.com/browserutils/kooky/browser/firefox"
@@ -60,7 +64,95 @@ func readRawCookies() ([]rawCookie, error) {
 		kooky.Valid,
 		kooky.DomainHasSuffix("github.com"),
 	)
+
+	// kooky only looks for Chrome's post-96 store (<profile>/Network/Cookies).
+	// A profile predating that move, or migrated from one, keeps its DB at
+	// <profile>/Cookies and is invisible to auto-discovery: the browser is
+	// logged in, yet no session is found. Read those explicitly and merge.
+	// No kooky.Valid here, unlike the sweep above: user_session is a session
+	// cookie with no expiry, which Valid discards — it drops precisely the
+	// cookie we need. Staleness is still caught downstream, which requires
+	// logged_in alongside user_session before accepting a session.
+	for _, path := range legacyChromeStores() {
+		legacy, lerr := chromebrowser.ReadCookies(ctx, path,
+			kooky.DomainHasSuffix("github.com"),
+		)
+		if lerr != nil {
+			continue
+		}
+		kcookies = append(kcookies, legacy...)
+	}
+
 	return mapKookyCookies(kcookies), err
+}
+
+// legacyChromeStores returns pre-Chrome-96 cookie DB paths that exist on disk
+// and that kooky does not already cover, so a profile with the modern store
+// contributes nothing and its behaviour is unchanged.
+func legacyChromeStores() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	var found []string
+	for _, root := range chromeRoots(home) {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if !entry.IsDir() || (name != "Default" && !strings.HasPrefix(name, "Profile ")) {
+				continue
+			}
+			// Skip when the modern store exists; kooky already reads that one.
+			if _, err := os.Stat(filepath.Join(root, name, "Network", "Cookies")); err == nil {
+				continue
+			}
+			legacy := filepath.Join(root, name, "Cookies")
+			if _, err := os.Stat(legacy); err == nil {
+				found = append(found, legacy)
+			}
+		}
+	}
+	return found
+}
+
+// chromeRoots lists Chrome/Chromium user-data directories to scan for a legacy
+// store. Only the Chromium family moved the cookie DB in v96, so Firefox and
+// Safari are irrelevant here.
+func chromeRoots(home string) []string {
+	switch runtime.GOOS {
+	case "darwin":
+		base := filepath.Join(home, "Library", "Application Support")
+		return []string{
+			filepath.Join(base, "Google", "Chrome"),
+			filepath.Join(base, "Google", "Chrome Beta"),
+			filepath.Join(base, "Chromium"),
+			filepath.Join(base, "BraveSoftware", "Brave-Browser"),
+			filepath.Join(base, "Microsoft Edge"),
+		}
+	case "windows":
+		base := os.Getenv("LOCALAPPDATA")
+		if base == "" {
+			return nil
+		}
+		return []string{
+			filepath.Join(base, "Google", "Chrome", "User Data"),
+			filepath.Join(base, "Chromium", "User Data"),
+			filepath.Join(base, "BraveSoftware", "Brave-Browser", "User Data"),
+			filepath.Join(base, "Microsoft Edge", "User Data"),
+		}
+	default:
+		cfg := filepath.Join(home, ".config")
+		return []string{
+			filepath.Join(cfg, "google-chrome"),
+			filepath.Join(cfg, "chromium"),
+			filepath.Join(cfg, "BraveSoftware", "Brave-Browser"),
+			filepath.Join(cfg, "microsoft-edge"),
+		}
+	}
 }
 
 // mapKookyCookies reduces kooky cookies to the fields selection needs. It is split
