@@ -60,6 +60,8 @@ gh extension install .
 
 Requires Go 1.26+.
 
+The cookie backend defaults to [`kooky`](https://github.com/browserutils/kooky); `go build -tags hbd` uses [`hackbrowserdata`](https://github.com/moonD4rk/HackBrowserData) instead. Pin either to any commit with `go get <module>@<ref>`, or a fork via a `go.mod` `replace`, before building.
+
 </details>
 
 ## Usage

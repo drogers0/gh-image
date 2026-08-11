@@ -14,8 +14,11 @@ gh-image/
 ├── go.sum
 ├── internal/
 │   ├── cookies/
-│   │   ├── cookies.go               # Browser session cookie extraction via kooky
+│   │   ├── cookies.go               # Provider-agnostic session-cookie selection
 │   │   ├── cookies_test.go
+│   │   ├── provider_kooky.go        # Default cookie reader: kooky (//go:build !hbd)
+│   │   ├── provider_hbd.go          # Opt-in cookie reader: hackbrowserdata (//go:build hbd)
+│   │   ├── retrievers_hbd_*.go      # Per-OS master-key retrievers for the hbd provider
 │   │   ├── jar.go                   # GitHub cookie jar + same-site pair construction
 │   │   └── jar_test.go
 │   ├── session/
@@ -58,7 +61,7 @@ The session token is resolved with the following precedence (first match wins):
 
 1. `--token <value>` flag
 2. `GH_SESSION_TOKEN` environment variable
-3. Browser cookie store (via `kooky`)
+3. Browser cookie store (via the selected cookie provider — `kooky` by default)
 
 The flag is convenient for one-off use; the env var is the recommended path for CI/CD and shared machines, since `--token` values are visible in process listings. Browser extraction is the zero-config path for local interactive use.
 
@@ -68,13 +71,13 @@ The flag is convenient for one-off use; the env var is the recommended path for 
 
 Reads the GitHub `user_session` cookie from local browser cookie stores.
 
-**Dependency:** [`browserutils/kooky`](https://github.com/browserutils/kooky) — a pure Go library that handles:
-- Locating each browser's cookie store on disk
-- Retrieving encryption keys (macOS Keychain, Windows DPAPI, Linux GNOME Keyring / kwallet)
-- AES decryption and cookie DB schema differences across versions
-- Per-browser quirks for Chromium-family browsers, Firefox, Safari, and Opera
+**Cookie provider (build-tag-selected):** `cookies.go` holds the pure selection logic; the browser read (`readRawCookies`) is delegated to one of two interchangeable backends, chosen at compile time. Only one is linked per binary:
+- **default** (`//go:build !hbd`) — [`browserutils/kooky`](https://github.com/browserutils/kooky)
+- **`-tags hbd`** — [`moond4rk/hackbrowserdata`](https://github.com/moonD4rk/HackBrowserData), with per-OS master-key retrieval kept to the native path (no macOS login-password prompt, no Windows App-Bound-Encryption injection)
 
-**Supported browsers** (registered via blank-imported kooky finders): Chrome, Brave, Edge, Chromium, Firefox, Opera, Safari. `GetGitHubSession` queries all of them in one pass, groups the `user_session` candidates per browser store, and prefers stores that are logged in. When more than one candidate survives, `validate` is used to pick a live one (pass nil to skip network validation).
+Both handle store discovery, per-OS key retrieval (macOS Keychain, Windows DPAPI, Linux GNOME Keyring / kwallet), AES decryption, and per-browser schema quirks. The version or fork of the active provider is pinned in `go.mod`.
+
+**Supported browsers:** Chrome, Brave, Edge, Chromium, Firefox, Opera, Safari — the kooky provider registers these via blank-imported finders; the hbd provider discovers them internally. `GetGitHubSession` queries all of them in one pass, groups the `user_session` candidates per browser store, and prefers stores that are logged in. When more than one candidate survives, `validate` is used to pick a live one (pass nil to skip network validation).
 
 ```go
 // GetGitHubSession returns the best user_session cookie for github.com across
