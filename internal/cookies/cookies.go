@@ -15,6 +15,7 @@ import (
 	_ "github.com/browserutils/kooky/browser/firefox"
 	_ "github.com/browserutils/kooky/browser/opera"
 	_ "github.com/browserutils/kooky/browser/safari"
+	_ "github.com/browserutils/kooky/browser/zen"
 )
 
 // NewSessionCookie builds a github.com user_session cookie from a raw value.
@@ -52,7 +53,7 @@ type sessionCandidate struct {
 const noSessionMsg = "no github.com user_session cookie found in any supported " +
 	"browser — are you logged into GitHub? Set GH_SESSION_TOKEN to supply the " +
 	"cookie manually, or log into GitHub in Chrome, Chromium, Edge, Firefox, " +
-	"Brave, Opera, or Safari."
+	"Brave, Opera, Safari, or Zen."
 
 // browserReadHints maps a substring that may appear in a browser-read error to
 // actionable guidance. Matching is by substring, not errors.Is: the triggering

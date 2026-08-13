@@ -18,3 +18,5 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/ini.v1 v1.67.1 // indirect
 )
+
+replace github.com/browserutils/kooky => github.com/jeremy-albinet/kooky v0.2.11-0.20260813144856-cee8d34a9d6b
