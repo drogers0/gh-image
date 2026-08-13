@@ -1,7 +1,5 @@
 github.com/browserutils/ese v0.0.0-20260314233042-37b6a03a93ce h1:xb/LXUukZgVLMRnTUyEiCfMNH7KUCFOS4aOZnc/N+H8=
 github.com/browserutils/ese v0.0.0-20260314233042-37b6a03a93ce/go.mod h1:Rj9TJxm7cExxJmdec83sr8cjvyF3raBsszTFviSo/6U=
-github.com/browserutils/kooky v0.2.10 h1:hEgbFJHf9lkMlSr0YdVEGtEo1yvqaTcGXNx0meNBgBA=
-github.com/browserutils/kooky v0.2.10/go.mod h1:ndMF+xzEi4voUsZ4dX0BL45oompbf5wqBaKR+J3lUNk=
 github.com/browserutils/sqlite3 v0.0.2 h1:RDSivmwoS5DauKYxh06G4Y+m6IX3da7Cq9Jh5x+oIUA=
 github.com/browserutils/sqlite3 v0.0.2/go.mod h1:3i7CY1ba3/D+qovGRJyCgfDnu/lGc8sg8ieM6jIUO50=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -11,6 +9,8 @@ github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
 github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
 github.com/gonuts/binary v0.2.0 h1:caITwMWAoQWlL0RNvv2lTU/AHqAJlVuu6nZmNgfbKW4=
 github.com/gonuts/binary v0.2.0/go.mod h1:kM+CtBrCGDSKdv8WXTuCUsw+loiy8f/QEI8YCCC0M/E=
+github.com/jeremy-albinet/kooky v0.2.11-0.20260813144856-cee8d34a9d6b h1:cKGw3vW25SLoV/tAbumJUAx1oS47zVRWd3UeOC/QgUI=
+github.com/jeremy-albinet/kooky v0.2.11-0.20260813144856-cee8d34a9d6b/go.mod h1:ndMF+xzEi4voUsZ4dX0BL45oompbf5wqBaKR+J3lUNk=
 github.com/keybase/go-keychain v0.0.1 h1:way+bWYa6lDppZoZcgMbYsvC7GxljxrskdNInRtuthU=
 github.com/keybase/go-keychain v0.0.1/go.mod h1:PdEILRW3i9D8JcdM+FmY6RwkHGnhHxXwkPPMeUgOK1k=
 github.com/pierrec/lz4/v4 v4.1.26 h1:GrpZw1gZttORinvzBdXPUXATeqlJjqUG/D87TKMnhjY=

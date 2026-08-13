@@ -153,7 +153,7 @@ A <code>demo-videos</code> skill publishes the <b>README demo reels</b> &mdash; 
 
 `gh-image` authenticates with credentials you already have — **nothing to provision, no OAuth scopes to configure**. Images and video going to a repository you can push to are uploaded with your `gh` CLI token; everything else — other file types, and repositories you cannot push to — falls back to your existing GitHub session, read as the `user_session` cookie from your browser's encrypted cookie store.
 
-**Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari
+**Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari · Zen
 
 **Supported platforms:** macOS · Linux · Windows · Android (Termux)
 
@@ -179,7 +179,7 @@ gh image --token "$MY_TOKEN" screenshot.png --repo owner/repo
 # Environment variable (preferred — not visible to `ps aux`)
 GH_SESSION_TOKEN="$MY_TOKEN" gh image screenshot.png --repo owner/repo
 
-# Non-standard browser not auto-detected (Firefox forks like Floorp/LibreWolf)?
+# Non-standard browser not auto-detected (Firefox forks like Floorp/LibreWolf — Zen is auto-detected)?
 GH_SESSION_TOKEN="$(sqlite3 ~/path/to/profile/cookies.sqlite "SELECT value FROM moz_cookies WHERE name='user_session' AND host LIKE '%github.com'")" \
   gh image screenshot.png --repo owner/repo
 ```

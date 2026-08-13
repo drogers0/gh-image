@@ -74,7 +74,9 @@ Reads the GitHub `user_session` cookie from local browser cookie stores.
 - AES decryption and cookie DB schema differences across versions
 - Per-browser quirks for Chromium-family browsers, Firefox, Safari, and Opera
 
-**Supported browsers** (registered via blank-imported kooky finders): Chrome, Brave, Edge, Chromium, Firefox, Opera, Safari. `GetGitHubSession` queries all of them in one pass, groups the `user_session` candidates per browser store, and prefers stores that are logged in. When more than one candidate survives, `validate` is used to pick a live one (pass nil to skip network validation).
+**Supported browsers** (registered via blank-imported kooky finders): Chrome, Brave, Edge, Chromium, Firefox, Opera, Safari, and Zen. `GetGitHubSession` queries all of them in one pass, groups the `user_session` candidates per browser store, and prefers stores that are logged in. When more than one candidate survives, `validate` is used to pick a live one (pass nil to skip network validation).
+
+Zen support requires an unreleased kooky version — see the `replace` directive in `go.mod` and the note in the Dependencies section below.
 
 ```go
 // GetGitHubSession returns the best user_session cookie for github.com across
@@ -285,6 +287,14 @@ git push --tags
 | Dependency | Purpose |
 |---|---|
 | [`browserutils/kooky`](https://github.com/browserutils/kooky) | Cross-browser cookie extraction (Keychain / DPAPI / Keyring + AES + SQLite/ESE) |
+
+Zen support (`browser/zen`) isn't in a tagged kooky release yet — [browserutils/kooky#118](https://github.com/browserutils/kooky/pull/118) adds it upstream. Until that merges and ships in a release, `go.mod` carries a `replace` directive pointing at the PR branch (as a resolved pseudo-version, so builds are reproducible without depending on the branch still existing):
+
+```
+replace github.com/browserutils/kooky => github.com/jeremy-albinet/kooky v0.2.11-0.20260813144856-cee8d34a9d6b
+```
+
+**Remove this `replace` once kooky#118 merges and tags a release**, then `go get -u github.com/browserutils/kooky` and run `go mod tidy`.
 | Go standard library `net/http` | HTTP client + cookie jar for the upload flow |
 | Go standard library `mime/multipart` | Multipart form construction |
 | Go standard library `encoding/json` | JSON parsing |
@@ -293,7 +303,7 @@ git push --tags
 ## Platform Notes
 
 - **macOS:** Fully supported. On first browser-cookie use, a Keychain prompt may appear to authorize access to the browser's cookie encryption key. Click "Always Allow" to avoid repeated prompts. Safari is supported in addition to Chromium-family browsers.
-- **Linux:** Supported via kooky (GNOME Keyring / kwallet for Chromium-family key storage; Firefox profile DBs read directly). The upload flow is platform-agnostic.
+- **Linux:** Supported via kooky (GNOME Keyring / kwallet for Chromium-family key storage; Firefox and Zen profile DBs read directly). The upload flow is platform-agnostic.
 - **Windows:** Supported via kooky (DPAPI for Chromium-family cookie decryption). Binaries are built for Windows amd64.
 - **CI / headless environments:** Use `GH_SESSION_TOKEN` (preferred) or `--token` to skip browser extraction entirely.
 
