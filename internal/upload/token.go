@@ -14,6 +14,8 @@ var uploadTokenRe = regexp.MustCompile(`"uploadToken":"([^"]+)"`)
 
 var signInTitleRe = regexp.MustCompile(`(?i)<title>\s*Sign in to GitHub\b`)
 
+var authTitleRe = regexp.MustCompile(`(?i)<title>\s*Sign in to [^\s<]`)
+
 // isSignInInterstitial reports whether the page is GitHub's generic "Sign in to
 // GitHub" interstitial rather than the real repo page. When the user_session
 // cookie is present but invalid or expired, GitHub neither redirects nor errors:
@@ -29,6 +31,23 @@ var signInTitleRe = regexp.MustCompile(`(?i)<title>\s*Sign in to GitHub\b`)
 // while the sign-in page has no such payload.
 func isSignInInterstitial(body []byte) bool {
 	return signInTitleRe.Match(body) && !bytes.Contains(body, []byte(`"currentUser"`))
+}
+
+// isAuthInterstitial reports whether the page is ANY "Sign in to …" auth
+// interstitial — GitHub's own sign-in page or an org SSO page. It is the
+// fallback for SSO pages that isSAMLProtected cannot recognize: when an org's
+// display name differs from its slug, the interstitial's title shows the
+// display name ("Sign in to Acme Holdings, Inc" for slug acme-inc) and the
+// page carries no /orgs/<slug>/sso link, so no slug-derived pattern can match
+// (issue #52). The caller only ever knows the slug.
+//
+// The generic title alone would be unsafe — a repo named "sign-in-to-x" is
+// fine because a real repo page's title starts "GitHub - <owner>/<repo>", but
+// we still require "currentUser" to be absent: the repo page embeds it in its
+// JS payload whether or not the request is authenticated, while auth
+// interstitials have no such payload.
+func isAuthInterstitial(body []byte) bool {
+	return authTitleRe.Match(body) && !bytes.Contains(body, []byte(`"currentUser"`))
 }
 
 // isSAMLProtected reports whether the repo page is a SAML SSO "Sign in to
@@ -97,6 +116,16 @@ func (c *Client) getUploadToken(owner, repo string) (string, error) {
 			return "", fmt.Errorf("%s enforces SAML SSO and your session is not authorized for it — "+
 				"authorize in a browser at https://github.com/orgs/%s/sso (lasts ~24h), then retry. "+
 				"Repository access alone is not enough", owner, owner)
+		}
+		// An org SSO interstitial whose title shows the org's display name rather
+		// than its slug matches neither check above (issue #52); we cannot tell it
+		// apart from a stale session here, so name both causes.
+		if isAuthInterstitial(body) {
+			return "", fmt.Errorf("GitHub served a sign-in page instead of %s/%s — either your session token is "+
+				"invalid or expired (re-run `gh image extract-token`, or refresh GH_SESSION_TOKEN in CI), "+
+				"or %s enforces SAML SSO and your session is not authorized for it "+
+				"(authorize in a browser at https://github.com/orgs/%s/sso, lasts ~24h). "+
+				"Repository access alone is not enough", owner, repo, owner, owner)
 		}
 		return "", fmt.Errorf("uploadToken not found on repo page — you may not have upload access to %s/%s "+
 			"(or, if %s enforces SAML SSO, authorize at https://github.com/orgs/%s/sso)",

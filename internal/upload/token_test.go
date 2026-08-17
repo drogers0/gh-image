@@ -130,6 +130,57 @@ func TestIsSignInInterstitial(t *testing.T) {
 	}
 }
 
+func TestIsAuthInterstitial(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			// The issue #52 page: SSO interstitial titled with the org's display
+			// name, which shares nothing with the slug the caller knows.
+			name: "SSO interstitial titled with the org display name",
+			body: `<title>Sign in to Acme Holdings, Inc</title>`,
+			want: true,
+		},
+		{
+			name: "GitHub's own sign-in interstitial",
+			body: `<title>Sign in to GitHub · GitHub</title><form action="/session">`,
+			want: true,
+		},
+		{
+			name: "anonymous repo page must NOT match",
+			body: `<title>GitHub - octocat/hello: hi</title>{"currentUser":null}`,
+			want: false,
+		},
+		{
+			name: "signed-in repo page must NOT match",
+			body: `<title>GitHub - octocat/hello: hi</title>{"currentUser":{"login":"octocat"}}`,
+			want: false,
+		},
+		{
+			// The real title starts "GitHub - <owner>/<repo>", so the anchored
+			// match cannot fire on a repo that merely mentions signing in.
+			name: "repo about signing in must NOT match",
+			body: `<title>GitHub - acme/auth: Sign in to GitHub from the CLI</title>`,
+			want: false,
+		},
+		{
+			// A title that ends at "Sign in to " names nothing; require a name.
+			name: "bare 'Sign in to ' with no name must NOT match",
+			body: `<title>Sign in to </title>`,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAuthInterstitial([]byte(tc.body)); got != tc.want {
+				t.Errorf("isAuthInterstitial(%q) = %v, want %v", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetUploadToken(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -168,6 +219,17 @@ func TestGetUploadToken(t *testing.T) {
 			body:        `<title>Sign in to GitHub · GitHub</title>`,
 			errContains: []string{"invalid or expired"},
 			errExcludes: []string{"SAML"},
+		},
+		{
+			// Issue #52: the SSO interstitial's title shows the org's display name,
+			// not the slug, and the page has no /orgs/<slug>/sso link. Neither the
+			// stale-session nor the slug-based SAML check can fire; the generic
+			// auth-interstitial branch must, naming both possible causes.
+			name:        "SSO interstitial with display-name title names both causes, not access",
+			owner:       "acme-inc",
+			body:        `<title>Sign in to Acme Holdings, Inc</title>`,
+			errContains: []string{"sign-in page", "gh image extract-token", "SAML SSO", "/orgs/acme-inc/sso"},
+			errExcludes: []string{"you may not have upload access"},
 		},
 		{
 			name:        "no token and no interstitial markers gives the generic message",
