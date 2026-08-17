@@ -12,8 +12,15 @@ import (
 	"strings"
 
 	"github.com/moond4rk/hackbrowserdata/browser"
+	hbdlog "github.com/moond4rk/hackbrowserdata/log"
 	"github.com/moond4rk/hackbrowserdata/types"
 )
+
+// HackBrowserData's package logger writes [INF]/[WRN] to stderr during Extract,
+// which would pollute gh-image's output (and leak profile names). Quiet it to
+// fatal-only for the hbd build. Requires hackbrowserdata >= the commit adding
+// log.SetLevel (see go.mod pin).
+func init() { hbdlog.SetLevel(hbdlog.FatalLevel) }
 
 // browserReadHints is empty for the HackBrowserData provider: Extract swallows
 // per-cookie decryption failures (it keeps the raw value) and only surfaces store

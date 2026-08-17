@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/browserutils/kooky v0.2.10
-	github.com/moond4rk/hackbrowserdata v1.1.0
+	github.com/moond4rk/hackbrowserdata v1.1.1-0.20260817023946-adfb6d993ef8
 )
 
 require (
@@ -19,7 +19,7 @@ require (
 	github.com/keybase/go-keychain v0.0.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/moond4rk/binarycookies v1.0.3 // indirect
-	github.com/moond4rk/keychainbreaker v0.2.5 // indirect
+	github.com/moond4rk/keychainbreaker v0.2.6 // indirect
 	github.com/moond4rk/plist v1.2.2 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/otiai10/copy v1.14.1 // indirect

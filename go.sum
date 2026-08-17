@@ -32,10 +32,10 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/moond4rk/binarycookies v1.0.3 h1:MRi8GkMKjIoyxdCSCgm4k+gBYA2fYxl1GZc04kQi3G0=
 github.com/moond4rk/binarycookies v1.0.3/go.mod h1:iAJr8L7ZgzTKaZhzEZmzjuOFnAoIHaqHFzvn58h1b7c=
-github.com/moond4rk/hackbrowserdata v1.1.0 h1:GtnCPYCYlOZWB88Rh+McPHPWRB3OeBD0nIr5bSFFPBw=
-github.com/moond4rk/hackbrowserdata v1.1.0/go.mod h1:Cb7lIUQ9prpMZWW+xWECAJ8Er10mx9DQC/TVq+V9RNc=
-github.com/moond4rk/keychainbreaker v0.2.5 h1:1f2qmgpt1sl+mXA8DTW9nnVhzo4oGO08bnkXu70DL04=
-github.com/moond4rk/keychainbreaker v0.2.5/go.mod h1:VVx2VXwL2EGhuU2WBD67w66JCKKqLFXGJg91y3FY4f0=
+github.com/moond4rk/hackbrowserdata v1.1.1-0.20260817023946-adfb6d993ef8 h1:Rf97YHCUy/8o3AoWj1FkIs0OVbLL7ZxubK0+mMHJLk4=
+github.com/moond4rk/hackbrowserdata v1.1.1-0.20260817023946-adfb6d993ef8/go.mod h1:TyD/hVTU/KBUqsz0FXvv1ZopW4/Q4CSMPmEx4lvikk0=
+github.com/moond4rk/keychainbreaker v0.2.6 h1:pji+mNKwNndR3wcq5Wu4fJO7lSro3fHpycLbohoOeOc=
+github.com/moond4rk/keychainbreaker v0.2.6/go.mod h1:VVx2VXwL2EGhuU2WBD67w66JCKKqLFXGJg91y3FY4f0=
 github.com/moond4rk/plist v1.2.2 h1:o1yyy2GTkh/+zSslWqK+/M7Z4dMRzTBCBSXnUgwLLw4=
 github.com/moond4rk/plist v1.2.2/go.mod h1:/1FduRi9JULFEUYcXvW88vOwHgOiEH+YNtvtmdh6GOs=
 github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdhx/f4=
