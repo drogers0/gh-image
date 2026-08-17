@@ -42,10 +42,13 @@ func readRawCookies() ([]rawCookie, error) {
 	browsers, err := browser.DiscoverBrowsers(browser.DiscoverOptions{Name: "all"})
 	errs := []error{err}
 
+	// One retriever set shared across all browsers — matches HackBrowserData's own
+	// injector, and shares the native-Keychain cache so macOS prompts at most once.
+	retrievers := nativeRetrievers()
 	var raw []rawCookie
 	for _, b := range browsers {
 		if km, ok := b.(browser.KeyManager); ok {
-			km.SetRetrievers(nativeRetrievers())
+			km.SetRetrievers(retrievers)
 		}
 		results, extractErr := b.Extract([]types.Category{types.Cookie})
 		if extractErr != nil {
