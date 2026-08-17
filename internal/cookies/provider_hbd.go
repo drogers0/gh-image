@@ -15,20 +15,12 @@ import (
 	"github.com/moond4rk/hackbrowserdata/types"
 )
 
-// browserReadHints for HackBrowserData. The native retriever wiring never
-// attempts Windows ABE (v20) decryption, so Chrome 127+ Windows cookies simply
-// don't surface rather than erroring — the actionable path there is a manual
-// token, surfaced via noSessionMsg. This hint covers the one read error a user
-// can act on: a store locked/unreadable while decryption still failed outright.
-var browserReadHints = []readHint{
-	{
-		match: "decrypt",
-		hint: "A Chromium browser is blocking cookie decryption. Copy the " +
-			"github.com user_session cookie value from that browser's DevTools " +
-			"(F12 > Application > Cookies > github.com > user_session) and set " +
-			"GH_SESSION_TOKEN to it.",
-	},
-}
+// browserReadHints is empty for the HackBrowserData provider: Extract swallows
+// per-cookie decryption failures (it keeps the raw value) and only surfaces store
+// read/open errors, none of which map to an actionable user hint. The "no cookie
+// found" case is already covered by noSessionMsg. annotateReadError still needs
+// the symbol, so it stays declared but nil.
+var browserReadHints []readHint
 
 // readRawCookies discovers every supported browser, decrypts its cookies via the
 // native per-OS retrievers, and reduces the github.com ones to rawCookie. It is
@@ -37,14 +29,13 @@ var browserReadHints = []readHint{
 func readRawCookies() ([]rawCookie, error) {
 	// DiscoverBrowsers does not inject credentials (so macOS never prompts here);
 	// we attach our own conservative retrievers below, bypassing HackBrowserData's
-	// default injector and its login-password TTY prompt.
+	// default injector and its login-password TTY prompt. Its error is joined, not
+	// fatal — like the kooky reader we return whatever cookies were found alongside
+	// the error and let chooseSession decide whether to surface it.
 	browsers, err := browser.DiscoverBrowsers(browser.DiscoverOptions{Name: "all"})
-	if err != nil {
-		return nil, err
-	}
+	errs := []error{err}
 
 	var raw []rawCookie
-	var errs []error
 	for _, b := range browsers {
 		if km, ok := b.(browser.KeyManager); ok {
 			km.SetRetrievers(nativeRetrievers())

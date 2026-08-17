@@ -137,13 +137,6 @@ func TestChooseSession(t *testing.T) {
 		}
 	})
 
-	t.Run("empty raw with ABE read error attaches hint", func(t *testing.T) {
-		_, err := chooseSession(nil, fmt.Errorf("cookie store: chrome: decryption failed"), nil)
-		if err == nil || !strings.Contains(err.Error(), "GH_SESSION_TOKEN") {
-			t.Fatalf("expected ABE hint mentioning GH_SESSION_TOKEN, got %v", err)
-		}
-	})
-
 	t.Run("empty raw without read error is the not-logged-in message", func(t *testing.T) {
 		_, err := chooseSession(nil, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "no github.com user_session cookie found") {

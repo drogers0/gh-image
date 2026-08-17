@@ -75,3 +75,15 @@ func TestAnnotateReadError(t *testing.T) {
 		}
 	})
 }
+
+// TestChooseSessionKookyHint covers the chooseSession -> annotateReadError ->
+// kooky-hint integration: an empty read plus a kooky decryption error must
+// surface the actionable GH_SESSION_TOKEN hint. The hbd provider swallows decrypt
+// errors, so this assertion is provider-specific and lives here, not in the
+// shared test.
+func TestChooseSessionKookyHint(t *testing.T) {
+	_, err := chooseSession(nil, fmt.Errorf("cookie store: chrome: decryption failed"), nil)
+	if err == nil || !strings.Contains(err.Error(), "GH_SESSION_TOKEN") {
+		t.Fatalf("expected kooky ABE hint mentioning GH_SESSION_TOKEN, got %v", err)
+	}
+}
