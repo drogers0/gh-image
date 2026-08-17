@@ -60,6 +60,8 @@ gh extension install .
 
 Requires Go 1.26+.
 
+The cookie backend defaults to [`kooky`](https://github.com/browserutils/kooky); `go build -tags hbd` uses [`hackbrowserdata`](https://github.com/moonD4rk/HackBrowserData) instead, also shipped as `hbd-<os>-<arch>` release assets. The `hbd` build pins a hackbrowserdata commit carrying the macOS securityd-dump gate and library log silencing until its next release; override either dep with `go get <module>@<ref>` or a `go.mod` `replace`.
+
 </details>
 
 ## Usage

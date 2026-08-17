@@ -1,7 +1,9 @@
 version: 2
 
 builds:
-  - binary: gh-image
+  # Default provider: kooky. This is the binary `gh extension install` resolves.
+  - id: kooky
+    binary: gh-image
     main: .
     env:
       - CGO_ENABLED=0
@@ -22,9 +24,42 @@ builds:
       - goos: android
         goarch: amd64
 
+  # Alternate provider: HackBrowserData (-tags hbd). Shipped as extra `hbd-*`
+  # assets for manual download; `gh extension install` still gets the kooky build.
+  # No android: HackBrowserData targets desktop browsers only.
+  - id: hbd
+    binary: gh-image
+    main: .
+    flags:
+      - -tags=hbd
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}-hbd
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
 archives:
-  - format: binary
+  - id: default
+    ids:
+      - kooky
+    formats:
+      - binary
     name_template: "{{ .Os }}-{{ .Arch }}"
+  - id: hbd
+    ids:
+      - hbd
+    formats:
+      - binary
+    name_template: "hbd-{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"

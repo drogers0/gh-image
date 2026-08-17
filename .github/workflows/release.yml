@@ -42,3 +42,4 @@ jobs:
             dist/linux-*
             dist/windows-*
             dist/android-*
+            dist/hbd-*
