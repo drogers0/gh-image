@@ -155,7 +155,7 @@ To fetch an attachment rather than post one, `gh image download <user-attachment
 | Symptom | Fix |
 |---|---|
 | `<org> enforces SAML SSO …` | Authorize the session at `https://github.com/orgs/<org>/sso` (lasts ~24h), then retry. Not a permissions problem. |
-| `uploadToken not found …` | Usually an expired session, not permissions — read access is enough. Re-authenticate; authorize SSO if the org uses it. |
+| `uploadToken not found …` | Expired-session and SSO pages get their own messages, so this likely means no access to the repo — verify the `--repo` value and your access. If both look right, re-authenticate; authorize SSO if the org uses it. |
 | No `user_session` cookie found | Log into GitHub in a supported browser, or set `GH_SESSION_TOKEN`. |
 | Windows + Chrome 127+ | Cookie-library limitation — use another browser or `GH_SESSION_TOKEN`. |
 | CI / headless | Set `GH_SESSION_TOKEN` from a dedicated bot account. |
