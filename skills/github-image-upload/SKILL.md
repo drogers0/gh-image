@@ -146,6 +146,10 @@ it — both would render the image twice:
 <img width="800" alt="screenshot" src="https://github.com/user-attachments/assets/<uuid>" />
 ```
 
+## Going the other way
+
+To fetch an attachment rather than post one, `gh image download <user-attachments-url>` writes it to the current directory. Run `gh image download --help` for the output options.
+
 ## Troubleshooting
 
 | Symptom | Fix |

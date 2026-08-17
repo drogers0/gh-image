@@ -2,7 +2,7 @@
 
 ## Overview
 
-`gh-image` is a Go CLI tool distributed as a `gh` extension. It uploads files — images and other GitHub-supported attachments like PDFs and zips — to GitHub using the same internal API that the web UI uses when you drag-and-drop or paste an attachment. The tool resolves a GitHub session (from a flag, env var, or browser cookie store), negotiates upload tokens, performs an S3 presigned upload, then prints the resulting markdown reference to stdout (an image embed for images, a download link for other files).
+`gh-image` is a Go CLI tool distributed as a `gh` extension. It uploads and downloads files — images and other GitHub-supported attachments like PDFs and zips — to GitHub using the same internal API that the web UI uses when you drag-and-drop or paste an attachment. The tool resolves a GitHub session (from a flag, env var, or browser cookie store), negotiates upload tokens, performs an S3 presigned upload, then prints the resulting markdown reference to stdout (an image embed for images, a download link for other files).
 
 ## Project Structure
 
@@ -24,6 +24,9 @@ gh-image/
 │   ├── session/
 │   │   ├── session.go               # Session token validation (check-token)
 │   │   └── session_test.go
+│   ├── download/
+│   │   ├── download.go              # 2-leg attachment download + filename derivation
+│   │   └── download_test.go
 │   ├── httputil/
 │   │   └── httputil.go              # Shared User-Agent constant
 │   ├── upload/
@@ -36,8 +39,9 @@ gh-image/
 │       ├── repo.go                  # Infers owner/repo from git remote, resolves repo ID
 │       └── repo_test.go
 ├── documentation/
-│   ├── architecture.md              # This file
-│   └── github-image-upload-flow.md  # Reverse-engineered upload protocol
+│   ├── architecture.md                     # This file
+│   ├── github-image-upload-flow.md         # Reverse-engineered upload protocol
+│   └── github-attachment-download-flow.md  # Reverse-engineered download protocol
 └── .github/
     └── workflows/
         └── release.yml              # GoReleaser cross-compilation + release
@@ -47,11 +51,13 @@ gh-image/
 
 ```
 gh image [--repo owner/repo] [--token <value>] <file-path>...
+gh image download [--output <file>|-] [--output-dir <dir>] [--no-clobber] [--token <value>] <url>...
 gh image extract-token
 gh image check-token [--token <value>]
 ```
 
 - **Default mode** uploads one or more files and prints markdown references to stdout. Flags may appear before or after positional args; use `--` to pass filenames that begin with `-`.
+- **`download`** fetches one or more `user-attachments` URLs. With no output flag each lands in the current directory under a name derived from the URL; `--output-dir` picks a different directory, `--output <file>` an exact path, and `--output -` streams to stdout. Existing files are overwritten unless `--no-clobber` is given, which suffixes `.1`, `.2` instead.
 - **`extract-token`** reads the session cookie from the browser and prints the raw token value to stdout (status info to stderr). Useful for piping into CI secrets.
 - **`check-token`** resolves a token using the standard precedence (flag → env → browser) and verifies it against GitHub, printing the authenticated username on success.
 
@@ -203,7 +209,32 @@ finalizeUpload()       ──→  PUT {asset_upload_url}
 
 Handles the multipart form construction for the S3 presigned upload. Separated from the main orchestration because the S3 request has different requirements (no cookies, no GitHub headers, just the presigned form fields and file data).
 
-### 7. CLI Entrypoint (`main.go`)
+### 7. Download Flow (`internal/download/`)
+
+Implements the download protocol documented in [github-attachment-download-flow.md](github-attachment-download-flow.md). A `GET` on the attachment URL answers with a `302` to a presigned storage URL, so there are two legs with **opposite** credential requirements: the first needs the session cookie pair, the second must carry none at all — an `Authorization` header on the S3 bucket is rejected with a 400, and the presigned URL is its own capability.
+
+```go
+// NewClient builds both HTTP clients and both credential routes; a nil
+// newBearer pins the run to the session cookie.
+func NewClient(newBearer func() (string, error), newCookie func() (*http.Cookie, error), notify func(string)) *Client
+
+// Save resolves ref and writes it, returning the path written.
+func (c *Client) Save(ref Ref, dest Dest) (string, error)
+
+// Stream resolves ref and writes its bytes to w (the --output - path).
+func (c *Client) Stream(ref Ref, w io.Writer) (int64, error)
+```
+
+**Key implementation details:**
+
+- **Two credential routes, bearer first.** The `gh` token is tried before the browser session, so a run that stays on the fast path never touches the cookie store and never prompts for it. A `404` or a `/login` redirect triggers the fallback, since both describe the credential rather than the asset: a `404` is deliberately ambiguous — GitHub answers the same way for an absent asset and for one the credential cannot read — while a redirect to `/login` says outright that the credential is not valid. Either way the session is tried once before the run reports failure. Any other status is surfaced as-is rather than retried, since it says nothing about the credential. An explicit `--token` or `GH_SESSION_TOKEN` pins the run to the session route.
+- **Neither client follows redirects.** The resolve leg classifies its own redirect; the fetch leg must not hop onward past that classification.
+- **A `302` is classified in a fixed order:** a `/login` target *on github.com* means the session is stale; a target carrying `X-Amz-Signature` is the asset; anything else is a hard error. The order matters — checking the signature first would report an expired session as an unusable-target error. The host check matters too: matching `/login` by path alone would let an unrelated host claim the credential is stale.
+- **The destination is opened only after the fetch returns 200**, so a failed request leaves no 0-byte file. A partial write is removed rather than left in place.
+- **Filenames come from the URL, never from a response header.** `/files/<id>/<name>` carries its name and GitHub validates it; `/assets/<uuid>` carries none, so the extension is taken from the presigned path. `filepath.Base` at the join keeps a traversal-shaped name inside the destination.
+- **Timeouts mirror the upload side:** 30s for the header-only resolve leg, 120s for the transfer, matching `s3.go`.
+
+### 8. CLI Entrypoint (`main.go`)
 
 `main()` is a one-line entrypoint that delegates to a testable
 `run(args []string, stdout, stderr io.Writer, deps) int`: it returns an exit code
@@ -218,6 +249,7 @@ Responsibilities:
 - **Subcommand dispatch** for `extract-token` and `check-token`, with validation that disallowed flag combinations are rejected before any work is done.
 - **Session resolution** via `resolveSessionCookie`, which applies the flag → env → browser precedence and wraps raw token values into a properly scoped `*http.Cookie`.
 - **Multi-file upload loop**: each positional path is uploaded independently. A failure on one file is reported to stderr and the loop continues; the process exits non-zero if any upload failed.
+- **Download loop**: same contract for URLs. All flag validation happens before any request, so a bad combination fails immediately. `--output -` streams to `run`'s injected stdout writer rather than `os.Stdout`, keeping the path testable.
 
 ## Data Flow
 
@@ -260,8 +292,13 @@ flowchart TD
 | Step 2 (S3 upload) | None | Presigned policy from step 1 |
 | Repo ID lookup | OAuth token | `gh` CLI (via `gh auth`) |
 | `check-token` validation | Same `user_session` pair | Same precedence as upload |
+| Download resolve leg (fast) | `Authorization: Bearer` | `gh auth token`, skipped when a session token is named |
+| Download resolve leg (fallback) | `user_session` + `__Host-user_session_same_site` cookies | `--token` flag, `GH_SESSION_TOKEN`, or browser cookie DB |
+| Download fetch leg | **None** | Presigned URL from the resolve leg |
 
-The session-cookie path and the `gh` CLI auth path are independent. The cookie provides a browser-equivalent session for the undocumented upload API, while `gh` handles the standard REST API used only for looking up the numeric repository ID.
+Download uses the same two routes as upload, for the same reason: the `gh` token avoids the browser entirely when it works. The routing is simpler here, though. Upload has to remember rejections *per content type*, because the bearer upload endpoint accepts a narrow set; download has no such split — one credential reaches every attachment — so a single rejection turns the fast route off for the rest of the run.
+
+The session-cookie path and the `gh` CLI auth path are independent. The cookie provides a browser-equivalent session for the undocumented attachment APIs, while `gh` handles the standard REST API used only for looking up the numeric repository ID.
 
 ## Distribution
 
