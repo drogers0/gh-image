@@ -44,7 +44,7 @@ func readRawCookies() ([]rawCookie, error) {
 	}
 
 	var raw []rawCookie
-	errs := []error{err}
+	var errs []error
 	for _, b := range browsers {
 		if km, ok := b.(browser.KeyManager); ok {
 			km.SetRetrievers(nativeRetrievers())
