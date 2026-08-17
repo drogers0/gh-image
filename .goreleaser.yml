@@ -64,3 +64,21 @@ archives:
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  # -rc / -beta tags are published as pre-releases, so `gh extension install`
+  # keeps serving the stable line.
+  prerelease: auto
+  header: |
+    Highlights since {{ .PreviousTag }}:
+
+    - **Cookie provider is now build-tag-selectable** (#50): default `kooky`, or `-tags hbd` for [HackBrowserData](https://github.com/moonD4rk/HackBrowserData) — also shipped as alternate `hbd-<os>-<arch>` assets below. `gh extension install` still gets the default kooky binary.
+    - **New `download` subcommand** for user-attachments URLs (#46).
+    - Bearer-token upload is tried before the browser-session flow (#49).
+    - SSO interstitial detection by org display name (#55); expired-session error fix (#45); content_type and Windows ABE/lock error hints (#33, #34).
+
+    Full list below.

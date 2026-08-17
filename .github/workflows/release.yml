@@ -37,9 +37,9 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4
         with:
+          # Binaries live in per-build-id subdirs (dist/<id>_<target>/); the binary
+          # format archives upload these same bytes, so attesting them by content
+          # covers every downloadable asset (default and hbd variants alike).
           subject-path: |
-            dist/darwin-*
-            dist/linux-*
-            dist/windows-*
-            dist/android-*
-            dist/hbd-*
+            dist/**/gh-image
+            dist/**/gh-image.exe
