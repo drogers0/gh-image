@@ -81,4 +81,7 @@ release:
     - Bearer-token upload is tried before the browser-session flow (#49).
     - SSO interstitial detection by org display name (#55); expired-session error fix (#45); content_type and Windows ABE/lock error hints (#33, #34).
 
+    > [!WARNING]
+    > **Upload identity may change (#49).** When a `gh` token is available, gh-image now tries a fast token-based upload **before** the browser-session flow. The token comes from `gh auth token` (which honors `GH_TOKEN`/`GITHUB_TOKEN`), so an upload may be **attributed to that token's account rather than your browser login**, and only succeeds on repositories the token can **push** to — in CI that is the `GITHUB_TOKEN` (Actions) identity. To force the previous browser-session identity, pass `--token <value>` or set `GH_SESSION_TOKEN`; either pins the cookie route and skips the token upload.
+
     Full list below.
