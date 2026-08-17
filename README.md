@@ -60,7 +60,31 @@ gh extension install .
 
 Requires Go 1.26+.
 
-The cookie backend defaults to [`kooky`](https://github.com/browserutils/kooky); `go build -tags hbd` uses [`hackbrowserdata`](https://github.com/moonD4rk/HackBrowserData) instead, also shipped as `hbd-<os>-<arch>` release assets. The `hbd` build pins a hackbrowserdata commit carrying the macOS securityd-dump gate and library log silencing until its next release; override either dep with `go get <module>@<ref>` or a `go.mod` `replace`.
+The cookie backend defaults to [`kooky`](https://github.com/browserutils/kooky); `go build -tags hbd` uses [`hackbrowserdata`](https://github.com/moonD4rk/HackBrowserData) instead. The `hbd` build pins a hackbrowserdata commit carrying the macOS securityd-dump gate and library log silencing until its next release; override either dep with `go get <module>@<ref>` or a `go.mod` `replace`.
+
+</details>
+
+<details>
+<summary>HackBrowserData cookie backend (prebuilt)</summary>
+
+An alternate build swaps the browser-cookie reader from `kooky` to [`hackbrowserdata`](https://github.com/moonD4rk/HackBrowserData) for broader browser coverage (Arc, Vivaldi, Firefox WAL, …). It ships as separate `hbd-<os>-<arch>` release assets — `gh extension install` still gets the default `kooky` build. Download one and run it directly:
+
+```bash
+gh release download <tag> --repo drogers0/gh-image \
+  --pattern hbd-darwin-arm64 --output gh-image --clobber   # pick your platform
+chmod +x gh-image
+./gh-image screenshot.png
+```
+
+| Platform | `--pattern` |
+| --- | --- |
+| macOS Apple Silicon | `hbd-darwin-arm64` |
+| macOS Intel | `hbd-darwin-amd64` |
+| Linux x86-64 | `hbd-linux-amd64` |
+| Linux arm64 | `hbd-linux-arm64` |
+| Windows x64 | `hbd-windows-amd64.exe` |
+
+Pre-releases need the explicit tag (`gh` won't treat them as latest). Verify provenance with `gh attestation verify gh-image --owner drogers0`, or build it yourself with `-tags hbd` (see *Build from source*).
 
 </details>
 
