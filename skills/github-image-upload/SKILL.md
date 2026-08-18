@@ -10,22 +10,11 @@ description: >-
   document or attach files to changes on GitHub. Powered by the `gh-image` gh CLI
   extension.
 license: MIT
+compatibility: Requires the GitHub CLI (`gh`), network access to GitHub, and the `drogers0/gh-image` extension v1.1.0 or newer.
 # gh pr/issue edit and comment are listed for hosts that check each pipeline stage;
 # whole-string matchers resolve them via the leading printf.
-allowed-tools:
-  - Glob
-  - Bash(gh auth status)
-  - Bash(gh extension list:*)
-  - Bash(gh image:*)
-  - Bash(gh pr view:*)
-  - Bash(gh pr edit:*)
-  - Bash(gh pr comment:*)
-  - Bash(gh issue view:*)
-  - Bash(gh issue edit:*)
-  - Bash(gh issue comment:*)
-  - Bash(printf:*)
-  - Bash(grep:*)
-  - Bash(cat:*)
+allowed-tools: >-
+  Glob Bash(gh:*) Bash(printf:*) Bash(grep:*) Bash(cat:*)
 ---
 
 # Upload images and files to GitHub (gh-image)
