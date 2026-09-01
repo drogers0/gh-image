@@ -17,7 +17,9 @@
 
 ---
 
-GitHub has no public API for the attachment uploads its web UI accepts via drag-and-drop. That internal endpoint produces `user-attachments` URLs whose visibility is scoped to the repository they were uploaded to. `gh-image` replicates that flow as a `gh` CLI extension, so you can drop a screenshot — or any GitHub-supported file like a PDF, zip, or log — into a bug report, README, or Slack thread without leaving the terminal, and uploads on private repos stay private. Images render as inline embeds, videos as inline players, and other files as download links.
+The `gh` CLI attaches images and video to issues and pull requests with `--attach`, on repositories you can push to. Everything outside that — PDFs, zips, logs, a repository you only have read access to, a link you want without posting anything, or pulling an attachment back down — has no first-party answer, because GitHub still has no public API for the attachment uploads its web UI accepts via drag-and-drop.
+
+`gh-image` replicates that flow as a `gh` CLI extension, so you can drop a screenshot — or any GitHub-supported file like a PDF, zip, or log — into a bug report, README, or Slack thread without leaving the terminal, and uploads on private repos stay private. Images render as inline embeds, videos as inline players, and other files as download links. When you post through it, anything `gh --attach` can handle is handed straight to `gh`; the rest takes the browser-session route, and you get the same result either way.
 
 ```console
 $ gh image screenshot.png
@@ -26,6 +28,13 @@ $ gh image screenshot.png
 $ gh image report.pdf
 [report.pdf](https://github.com/user-attachments/files/123456/report.pdf)
 ```
+
+| Reach for | When |
+| --- | --- |
+| `gh --attach` | An image or video, on a repository you can push to, going straight onto an issue or PR. One flag, nothing to install. |
+| `gh image` | Any other file type; a repository you only have read access to; a URL on its own, for a README or a commit message or somewhere that isn't GitHub; or downloading an attachment. |
+
+You do not have to choose per file. `gh image … -- <gh command>` takes the first row whenever it applies and the second when it doesn't — see [Post it in one command](#post-it-in-one-command).
 
 ## Installation
 
@@ -102,6 +111,9 @@ gh image report.pdf
 
 # Target a specific repository
 gh image screenshot.png --repo owner/repo
+
+# Give an image alt text
+gh image 'screenshot.png#The login error state'
 ```
 
 Each successful upload prints a ready-to-paste reference on its own line — an inline embed for images, a bare URL for videos (which GitHub renders as an inline player), and a download link for other files:
@@ -126,9 +138,41 @@ gh image download <url> --output <file>
 
 Existing files are overwritten unless `--no-clobber` is passed, which writes `name.1`, `name.2` instead. As with upload, a failed URL is reported to stderr and the process exits non-zero — the rest of the batch still downloads.
 
-### Pipe directly into an issue, PR, or comment
+### Post it in one command
 
-From inside the repo's working directory, both `gh image` and `gh issue create` infer the target repository automatically:
+Anything after `--` is a `gh` invocation, forwarded as you wrote it. `gh-image` uploads the files first and makes sure the resulting links are in the body:
+
+```bash
+# Attach a screenshot to a comment
+gh image bug.png -- issue comment 42 --body-file repro.md
+
+# Open a PR with a design doc attached
+gh image diagram.pdf -- pr create --fill --body-file design.md
+
+# Several files, several references
+gh image before.png after.png -- issue create --title "Layout breaks under 600px" --body-file report.md
+```
+
+Write the body the way you would locally, pointing at the files on disk, and the references are repointed at the uploaded assets on the way out:
+
+```markdown
+The picker lays out correctly on a wide window:
+
+![before](./before.png)
+
+Below 600px the art names wrap underneath the thumbnails:
+
+![after](./after.png)
+```
+
+A file the body never mentions is appended to the end instead, so `--body "Repro on staging:"` with one screenshot does the obvious thing.
+
+Under the hood this is `gh --attach` whenever `gh` will take the job, and the browser-session route whenever it won't — a PDF, or a repository you can only read. Nothing about the command changes, and neither does the result.
+
+> [!NOTE]
+> `--` requires a `gh` new enough to have `--attach`. On older versions every file takes the browser-session route, which reaches the same place by a slower road. A filename that begins with a dash is now written `./-name.png`, since `--` marks the start of the `gh` command rather than the end of the flags.
+
+Composing by hand still works, and is the better fit when the link belongs somewhere that isn't an issue or a PR:
 
 ```bash
 gh issue create \
@@ -189,7 +233,7 @@ A <code>demo-videos</code> skill publishes the <b>README demo reels</b> &mdash; 
 
 ## Authentication
 
-`gh-image` authenticates with credentials you already have — **nothing to provision, no OAuth scopes to configure**. Images and video going to a repository you can push to are uploaded with your `gh` CLI token; everything else — other file types, and repositories you cannot push to — falls back to your existing GitHub session, read as the `user_session` cookie from your browser's encrypted cookie store. Downloads take the same two routes: the `gh` token first, your browser session as fallback.
+`gh-image` authenticates with credentials you already have — **nothing to provision, no OAuth scopes to configure**. Images and video going to a repository you can push to are uploaded with your `gh` CLI token; everything else — other file types, and repositories you cannot push to — falls back to your existing GitHub session, read as the `user_session` cookie from your browser's encrypted cookie store. Downloads take the same two routes: the `gh` token first, your browser session as fallback. Posting with `--` adds nothing to provision either: `gh` uses the token it already holds, and only the files it turns down reach the session route.
 
 **Supported browsers:** Chrome · Brave · Chromium · Edge · Firefox · Opera · Safari
 
@@ -260,12 +304,13 @@ jobs:
 
 ## How it works
 
-1. Tries a single authenticated upload with the `gh` CLI token; on failure falls back to the browser-session flow below, resolving a `user_session` cookie from the configured source (flag → env → browser).
-2. Fetches the target repository's page to obtain an `uploadToken` from the embedded JS payload.
-3. Requests an S3 upload policy from `/upload/policies/assets`.
-4. Uploads the file directly to S3 using the presigned form fields.
-5. Calls back to GitHub to finalize the asset, using the finalize endpoint GitHub returns in the policy (`/upload/assets/{id}` for images, `/upload/repository-files/{id}` for other files).
-6. Prints the reference to stdout: `![name](url)` for images, the bare URL for videos (GitHub renders it as an inline player), or `[name](url)` for other files.
+1. When the command was posted through `--`, hands the whole job to `gh --attach` first and stops there if it succeeds. A refusal costs one subprocess and nothing else; the target is checked before anything is retried, so a partial upload never posts twice.
+2. Tries a single authenticated upload with the `gh` CLI token; on failure falls back to the browser-session flow below, resolving a `user_session` cookie from the configured source (flag → env → browser).
+3. Fetches the target repository's page to obtain an `uploadToken` from the embedded JS payload.
+4. Requests an S3 upload policy from `/upload/policies/assets`.
+5. Uploads the file directly to S3 using the presigned form fields.
+6. Calls back to GitHub to finalize the asset, using the finalize endpoint GitHub returns in the policy (`/upload/assets/{id}` for images, `/upload/repository-files/{id}` for other files).
+7. Prints the reference to stdout: `![name](url)` for images, the bare URL for videos (GitHub renders it as an inline player), or `[name](url)` for other files.
 
 The final URL is `https://github.com/user-attachments/assets/<uuid>` for images and `https://github.com/user-attachments/files/<id>/<name>` for other files. Until it is referenced in rendered content it resolves only for the uploader, even on a public repo; once referenced, visibility follows the content that references it.
 
@@ -276,13 +321,14 @@ For the full architecture, see **[documentation/architecture.md](documentation/a
 - A supported browser with an active GitHub session — or a `GH_SESSION_TOKEN` for CI.
 - Read access to the target repository — write access is not required.
 - A target repository — pass `--repo owner/repo`, or run from a git workspace whose `origin` remote is on GitHub.
-- The `gh` CLI must be installed and authenticated (used for repository ID lookup).
+- The `gh` CLI must be installed and authenticated (used for repository ID lookup, and for posting through `--`).
 
 ## Limitations
 
 - Uses an **undocumented** internal GitHub API that may change without notice.
 - `uploadToken` is usually present on repository pages for any user who can view the repo. An invalid or expired session is the case where it is absent.
 - Session cookies are not scoped credentials; they expire when GitHub invalidates the session.
+- `gh issue create` and `gh pr create` are never delegated to `gh --attach`, even for a plain screenshot. A create has no existing issue or PR to inspect afterwards, so a partial failure could not be told apart from a clean one, and retrying would open a second one.
 - Uploads are attributed to the account that authenticated them, so if your browser session and your `gh` login are different accounts, images and video may be attributed differently from other files. Supply a session token explicitly to pin every upload to one account.
 
 ## Contributing
