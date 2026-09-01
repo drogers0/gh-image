@@ -69,8 +69,7 @@ non-interactive run, state it and continue).
 
 **Posting to an issue or PR — prefer this.** Everything after `--` is a `gh` command,
 forwarded as written; the files upload first and their references land in the body. It
-is one command, it never reads the existing body, and it needs no URL handling from
-you:
+never reads the existing body:
 
 ```bash
 gh image "/abs/path/screenshot.png" "/abs/path/error.log" \
