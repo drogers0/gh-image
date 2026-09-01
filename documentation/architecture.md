@@ -51,12 +51,16 @@ gh-image/
 
 ```
 gh image [--repo owner/repo] [--token <value>] <file-path>...
+gh image [--repo owner/repo] [--token <value>] <file-path>... -- <gh args>...
 gh image download [--output <file>|-] [--output-dir <dir>] [--no-clobber] [--token <value>] <url>...
 gh image extract-token
 gh image check-token [--token <value>]
 ```
 
-- **Default mode** uploads one or more files and prints markdown references to stdout. Flags may appear before or after positional args; use `--` to pass filenames that begin with `-`.
+- **Default mode** uploads one or more files and prints markdown references to stdout. Flags may appear before or after positional args.
+- **Passthrough mode** is the default mode plus a `gh` invocation after `--`. The files upload, the body named by that invocation has its references repointed at the uploaded assets, and `gh` runs with its own stdout, stderr and exit code passed through. Nothing right of `--` is parsed beyond the subcommand and the body flag.
+
+> **Note:** `--` previously terminated flag parsing so that filenames beginning with `-` could be passed positionally. Passthrough claims the separator, so such a filename is now given as `./-name.png`.
 - **`download`** fetches one or more `user-attachments` URLs. With no output flag each lands in the current directory under a name derived from the URL; `--output-dir` picks a different directory, `--output <file>` an exact path, and `--output -` streams to stdout. Existing files are overwritten unless `--no-clobber` is given, which suffixes `.1`, `.2` instead.
 - **`extract-token`** reads the session cookie from the browser and prints the raw token value to stdout (status info to stderr). Useful for piping into CI secrets.
 - **`check-token`** resolves a token using the standard precedence (flag → env → browser) and verifies it against GitHub, printing the authenticated username on success.
@@ -234,7 +238,48 @@ func (c *Client) Stream(ref Ref, w io.Writer) (int64, error)
 - **Filenames come from the URL, never from a response header.** `/files/<id>/<name>` carries its name and GitHub validates it; `/assets/<uuid>` carries none, so the extension is taken from the presigned path. `filepath.Base` at the join keeps a traversal-shaped name inside the destination.
 - **Timeouts mirror the upload side:** 30s for the header-only resolve leg, 120s for the transfer, matching `s3.go`.
 
-### 8. CLI Entrypoint (`main.go`)
+### 8. Passthrough Delegation (`internal/passthrough/`)
+
+Runs the `gh` command given after `--`, choosing between two routes without encoding
+anything about upstream's policy.
+
+- **Capability probe.** Reads `gh issue comment --help` once per run and looks for
+  `--attach`. A feature probe rather than a version comparison, so backports and forks
+  behave correctly.
+- **Route choice.** For `comment` and `edit`, `--attach <file>` is appended to the
+  forwarded argv and `gh` is executed. For `create`, delegation is skipped entirely:
+  a create has no pre-existing resource to inspect, so a partial upload could not be
+  distinguished from a clean failure, and a retry would open a second issue or PR.
+- **Refusal handling.** A non-zero exit is not assumed to mean nothing happened —
+  upstream writes the body when at least one asset uploaded, including after a partial
+  failure. The target is read once, looking for a comment or revision authored by the
+  viewer at or after the moment `gh` was launched. Nothing posted means the local route
+  runs; something posted means the command stops and reports. No error text is parsed,
+  so upstream rewording cannot break the decision.
+- **Local route.** Uploads through `internal/upload` as usual, rewrites the body's
+  references with `internal/rewrite`, and re-executes the original argv against the
+  rewritten body. The `Router` is unchanged, so a refusal costs one duplicate bearer
+  request before the session route.
+
+`gh` itself is located the way `gh` locates itself — `GH_PATH` when set, otherwise
+`gh` from `PATH` — so the binary that launched the extension is the one invoked.
+Execution is direct, never through a shell, so nothing in the forwarded argv is
+reinterpreted.
+
+### 9. Reference Rewriting (`internal/rewrite/`)
+
+Repoints a body's markdown references at uploaded assets, for the route `gh` did not
+take. Parses with `goldmark`, walks link and image nodes, and replaces destinations
+matching a path that was handed in — the paths are known up front, so no general
+search of the document is needed.
+
+Deliberately narrow: inline references only, with reference-style links reported as an
+error rather than silently ignored; a file the body never names is appended; a video
+is emitted as a bare URL on its own line rather than reproducing upstream's placement
+rules. A body supplied through an editor cannot be rewritten, so a passthrough command
+with no body flag is refused before anything uploads.
+
+### 10. CLI Entrypoint (`main.go`)
 
 `main()` is a one-line entrypoint that delegates to a testable
 `run(args []string, stdout, stderr io.Writer, deps) int`: it returns an exit code
@@ -245,7 +290,7 @@ subprocess, or process exit.
 
 Responsibilities:
 
-- **Manual arg parsing** so that flags can appear before or after positional args, with `--` as an explicit terminator for filenames starting with a dash.
+- **Manual arg parsing** so that flags can appear before or after positional args, splitting the line at `--` into this extension's arguments and a `gh` invocation to forward.
 - **Subcommand dispatch** for `extract-token` and `check-token`, with validation that disallowed flag combinations are rejected before any work is done.
 - **Session resolution** via `resolveSessionCookie`, which applies the flag → env → browser precedence and wraps raw token values into a properly scoped `*http.Cookie`.
 - **Multi-file upload loop**: each positional path is uploaded independently. A failure on one file is reported to stderr and the loop continues; the process exits non-zero if any upload failed.
@@ -339,5 +384,6 @@ git push --tags
 
 ## Future Considerations
 
+- **Passthrough for `create`:** delegation is skipped there because a failed `gh` run cannot be distinguished from a partial one. A first-party dry-run, or an upstream guarantee that nothing is written on failure, would let `create` take the native route too.
 - **Clipboard image support:** Accept image data from clipboard (`gh image paste --repo o/r`) instead of requiring a file path.
 - **Token caching:** The `uploadToken` could be cached briefly to avoid fetching the repo page on every upload within a multi-file batch. The presigned S3 policy expires in ~30 minutes, so reuse is safe within that window.
