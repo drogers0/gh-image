@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/drogers0/gh-image/internal/download"
 	"github.com/drogers0/gh-image/internal/repo"
@@ -27,14 +28,19 @@ func okDeps() deps {
 			// The stub returns image-embed markdown for any path; run()'s job is the
 			// orchestration spine, not the embed-vs-link decision (that lives in
 			// upload.renderMarkdown and is covered by TestRenderMarkdown).
-			return func(info *repo.Info, path string) (string, error) {
-				return "![" + path + "](url)", nil
+			return func(info *repo.Info, path string) (*upload.Result, error) {
+				return &upload.Result{URL: "url", Markdown: "![" + path + "](url)"}, nil
 			}
 		},
 		extractToken: func() (string, error) { return "extracted-token", nil },
 		checkToken:   func(tokenFlag string) (string, string, error) { return "octouser", "stub", nil },
 		newDownloader: func(tokenFlag string, stderr io.Writer) downloader {
 			return &stubDownloader{}
+		},
+		probeGH: func([]string) bool { return false },
+		execGH:  func([]string, io.Reader, io.Writer, io.Writer) int { return 0 },
+		checkCommentPosted: func(string, string, string, time.Time) (bool, error) {
+			return false, nil
 		},
 	}
 }
@@ -82,8 +88,491 @@ const fileURL = "https://github.com/user-attachments/files/30473702/notes.txt"
 func runWith(t *testing.T, args []string, d deps) (code int, stdout, stderr string) {
 	t.Helper()
 	var so, se bytes.Buffer
-	code = run(args, &so, &se, d)
+	code = run(args, strings.NewReader(""), &so, &se, d)
 	return code, so.String(), se.String()
+}
+
+func runWithStdin(t *testing.T, args []string, stdin io.Reader, d deps) (code int, stdout, stderr string) {
+	t.Helper()
+	var so, se bytes.Buffer
+	code = run(args, stdin, &so, &se, d)
+	return code, so.String(), se.String()
+}
+
+type execRecord struct {
+	argv []string
+}
+
+func recordingExecGH(records *[]execRecord) func([]string, io.Reader, io.Writer, io.Writer) int {
+	return func(argv []string, _ io.Reader, _ io.Writer, _ io.Writer) int {
+		*records = append(*records, execRecord{argv: append([]string{}, argv...)})
+		return 0
+	}
+}
+
+func TestPassthrough(t *testing.T) {
+	t.Run("no files before separator", func(t *testing.T) {
+		d := okDeps()
+		var records []execRecord
+		d.execGH = recordingExecGH(&records)
+		code, _, errOut := runWith(t, []string{"--", "pr", "create"}, d)
+		if code != 1 || len(records) != 0 || !strings.Contains(errOut, "no files specified before --") {
+			t.Fatalf("code=%d records=%d stderr=%q", code, len(records), errOut)
+		}
+	})
+
+	t.Run("unrecognized command", func(t *testing.T) {
+		d := okDeps()
+		var records []execRecord
+		d.execGH = recordingExecGH(&records)
+		code, _, errOut := runWith(t, []string{"f.png", "--", "pr", "merge"}, d)
+		if code != 1 || len(records) != 0 || !strings.Contains(errOut, "unrecognized command right of --") {
+			t.Fatalf("code=%d records=%d stderr=%q", code, len(records), errOut)
+		}
+	})
+
+	t.Run("empty file path is rejected before passthrough", func(t *testing.T) {
+		d := okDeps()
+		called := false
+		d.execGH = func([]string, io.Reader, io.Writer, io.Writer) int {
+			called = true
+			return 0
+		}
+		code, _, errOut := runWith(t, []string{"", "--", "pr", "create", "--fill"}, d)
+		if code != 1 || called || !strings.Contains(errOut, "empty file path") {
+			t.Fatalf("code=%d called=%t stderr=%q", code, called, errOut)
+		}
+	})
+
+	t.Run("invalid outer repo is rejected before delegation", func(t *testing.T) {
+		d := okDeps()
+		called := false
+		d.execGH = func([]string, io.Reader, io.Writer, io.Writer) int {
+			called = true
+			return 0
+		}
+		code, _, errOut := runWith(t, []string{"--repo", "bad", "f.png", "--", "pr", "create", "--fill"}, d)
+		if code != 1 || called || !strings.Contains(errOut, "owner/repo format") {
+			t.Fatalf("code=%d called=%t stderr=%q", code, called, errOut)
+		}
+	})
+
+	t.Run("download flags are rejected before passthrough", func(t *testing.T) {
+		d := okDeps()
+		called := false
+		d.execGH = func([]string, io.Reader, io.Writer, io.Writer) int {
+			called = true
+			return 0
+		}
+		code, _, errOut := runWith(t, []string{"--output", "out.md", "f.png", "--", "pr", "create", "--fill"}, d)
+		if code != 1 || called || !strings.Contains(errOut, "download flags") {
+			t.Fatalf("code=%d called=%t stderr=%q", code, called, errOut)
+		}
+	})
+
+	t.Run("create without body requires attach", func(t *testing.T) {
+		d := okDeps()
+		var records []execRecord
+		d.execGH = recordingExecGH(&records)
+		uploaded := false
+		d.newUploader = func(string, io.Writer) uploadFunc {
+			return func(*repo.Info, string) (*upload.Result, error) {
+				uploaded = true
+				return &upload.Result{}, nil
+			}
+		}
+		code, _, errOut := runWith(t, []string{"f.png", "--", "pr", "create", "--fill"}, d)
+		if code != 1 || len(records) != 0 || uploaded || !strings.Contains(errOut, "gh --attach unavailable") {
+			t.Fatalf("code=%d records=%d uploaded=%t stderr=%q", code, len(records), uploaded, errOut)
+		}
+	})
+
+	t.Run("create without body delegates", func(t *testing.T) {
+		d := okDeps()
+		var probeArgs []string
+		probes := 0
+		d.probeGH = func(argv []string) bool {
+			probes++
+			probeArgs = append([]string{}, argv...)
+			return true
+		}
+		var records []execRecord
+		d.execGH = recordingExecGH(&records)
+		code, _, _ := runWith(t, []string{"f.png", "--", "pr", "create", "--fill"}, d)
+		if code != 0 || len(records) != 1 || probes != 1 || fmt.Sprint(probeArgs) != "[pr create]" {
+			t.Fatalf("code=%d records=%d probes=%d probeArgs=%v", code, len(records), probes, probeArgs)
+		}
+		want := []string{"pr", "create", "--fill", "--attach", "f.png"}
+		if fmt.Sprint(records[0].argv) != fmt.Sprint(want) {
+			t.Errorf("argv=%v, want %v", records[0].argv, want)
+		}
+	})
+
+	t.Run("delegated create failure is not retried", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		calls := 0
+		d.execGH = func([]string, io.Reader, io.Writer, io.Writer) int {
+			calls++
+			return 7
+		}
+		code, _, _ := runWith(t, []string{"f.png", "--", "pr", "create", "--fill"}, d)
+		if code != 7 || calls != 1 {
+			t.Fatalf("code=%d calls=%d", code, calls)
+		}
+	})
+
+	for _, probe := range []bool{false, true} {
+		t.Run(fmt.Sprintf("create body route probe=%t", probe), func(t *testing.T) {
+			d := okDeps()
+			probes := 0
+			d.probeGH = func([]string) bool {
+				probes++
+				return probe
+			}
+			var records []execRecord
+			d.execGH = recordingExecGH(&records)
+			code, _, _ := runWith(t, []string{"f.png", "--", "pr", "create", "--body", "text"}, d)
+			if code != 0 || len(records) != 1 || probes != 0 {
+				t.Fatalf("code=%d records=%d probes=%d", code, len(records), probes)
+			}
+			want := []string{"pr", "create", "--body", "text\n\n![f.png](url)"}
+			if fmt.Sprint(records[0].argv) != fmt.Sprint(want) {
+				t.Errorf("argv=%v, want %v", records[0].argv, want)
+			}
+		})
+	}
+
+	t.Run("comment delegates and succeeds", func(t *testing.T) {
+		d := okDeps()
+		probes := 0
+		d.probeGH = func(argv []string) bool {
+			probes++
+			if fmt.Sprint(argv) != "[issue comment]" {
+				t.Errorf("probe argv=%v", argv)
+			}
+			return true
+		}
+		var records []execRecord
+		d.execGH = recordingExecGH(&records)
+		code, _, _ := runWith(t, []string{"f.png", "--", "issue", "comment", "7", "--body", "b"}, d)
+		if code != 0 || len(records) != 1 || probes != 1 {
+			t.Fatalf("code=%d records=%d probes=%d", code, len(records), probes)
+		}
+	})
+
+	t.Run("delegated streams and exit code are forwarded", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		d.execGH = func(_ []string, _ io.Reader, stdout, stderr io.Writer) int {
+			fmt.Fprint(stdout, "delegated stdout")
+			fmt.Fprint(stderr, "delegated stderr")
+			return 9
+		}
+		code, out, errOut := runWith(t, []string{"f.png", "--", "pr", "create", "--fill"}, d)
+		if code != 9 || out != "delegated stdout" || errOut != "delegated stderr" {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+		}
+	})
+
+	t.Run("failed delegation without body preserves exit code", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		d.execGH = func([]string, io.Reader, io.Writer, io.Writer) int { return 9 }
+		code, _, errOut := runWith(t, []string{"f.png", "--", "issue", "comment", "7"}, d)
+		if code != 9 || !strings.Contains(errOut, "no body flag") {
+			t.Fatalf("code=%d stderr=%q", code, errOut)
+		}
+	})
+
+	t.Run("comment falls back after failed delegation", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		var records []execRecord
+		d.execGH = func(argv []string, _ io.Reader, _ io.Writer, _ io.Writer) int {
+			records = append(records, execRecord{argv: append([]string{}, argv...)})
+			if len(records) == 1 {
+				return 1
+			}
+			return 0
+		}
+		code, _, _ := runWith(t, []string{"f.png", "--", "issue", "comment", "7", "--body", "b"}, d)
+		if code != 0 || len(records) != 2 {
+			t.Fatalf("code=%d records=%d", code, len(records))
+		}
+		if !strings.Contains(strings.Join(records[1].argv, " "), "--body b\n\n![f.png](url)") {
+			t.Errorf("fallback argv=%v", records[1].argv)
+		}
+	})
+
+	t.Run("comment stops after partial post", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		d.execGH = func([]string, io.Reader, io.Writer, io.Writer) int { return 1 }
+		checked := false
+		d.checkCommentPosted = func(subcommand, repo, target string, since time.Time) (bool, error) {
+			checked = subcommand == "issue comment" && repo == "octo/hello" && target == "7"
+			return true, nil
+		}
+		code, _, errOut := runWith(t, []string{"f.png", "--", "issue", "comment", "7", "--body", "b"}, d)
+		if code != 1 || !checked || !strings.Contains(errOut, "f.png") || !strings.Contains(errOut, "partially posting") {
+			t.Fatalf("code=%d checked=%t stderr=%q", code, checked, errOut)
+		}
+	})
+
+	t.Run("edit falls back without verification", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		var records []execRecord
+		d.execGH = func(argv []string, _ io.Reader, _ io.Writer, _ io.Writer) int {
+			records = append(records, execRecord{argv: append([]string{}, argv...)})
+			if len(records) == 1 {
+				return 1
+			}
+			return 0
+		}
+		verified := false
+		d.checkCommentPosted = func(string, string, string, time.Time) (bool, error) {
+			verified = true
+			return false, nil
+		}
+		code, _, _ := runWith(t, []string{"f.png", "--", "pr", "edit", "--body", "b"}, d)
+		if code != 0 || len(records) != 2 || verified {
+			t.Fatalf("code=%d records=%d verified=%t", code, len(records), verified)
+		}
+	})
+
+	t.Run("edit without attach support uses our route", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return false }
+		var records []execRecord
+		d.execGH = recordingExecGH(&records)
+		code, _, _ := runWith(t, []string{"f.png", "--", "issue", "edit", "7", "--body", "b"}, d)
+		if code != 0 || len(records) != 1 || !strings.Contains(strings.Join(records[0].argv, " "), "--body b\n\n![f.png](url)") {
+			t.Fatalf("code=%d records=%v", code, records)
+		}
+	})
+
+	t.Run("no body prevents fallback", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		d.execGH = func([]string, io.Reader, io.Writer, io.Writer) int { return 1 }
+		code, _, errOut := runWith(t, []string{"f.png", "--", "issue", "comment", "7"}, d)
+		if code != 1 || !strings.Contains(errOut, "no body flag") {
+			t.Fatalf("code=%d stderr=%q", code, errOut)
+		}
+	})
+
+	t.Run("query error falls back", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		calls := 0
+		d.execGH = func(argv []string, _ io.Reader, _ io.Writer, _ io.Writer) int {
+			calls++
+			if calls == 1 {
+				return 1
+			}
+			return 0
+		}
+		d.checkCommentPosted = func(string, string, string, time.Time) (bool, error) {
+			return false, fmt.Errorf("query failed")
+		}
+		code, _, _ := runWith(t, []string{"f.png", "--", "issue", "comment", "7", "--body", "b"}, d)
+		if code != 0 || calls != 2 {
+			t.Fatalf("code=%d calls=%d", code, calls)
+		}
+	})
+
+	t.Run("comment without target skips verification", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		calls := 0
+		d.execGH = func(argv []string, _ io.Reader, _ io.Writer, _ io.Writer) int {
+			calls++
+			if calls == 1 {
+				return 1
+			}
+			return 0
+		}
+		d.checkCommentPosted = func(string, string, string, time.Time) (bool, error) {
+			t.Fatal("verification should be skipped")
+			return false, nil
+		}
+		code, _, _ := runWith(t, []string{"f.png", "--", "pr", "comment", "--body", "b"}, d)
+		if code != 0 || calls != 2 {
+			t.Fatalf("code=%d calls=%d", code, calls)
+		}
+	})
+
+	t.Run("body file is rewritten", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "body.md")
+		if err := os.WriteFile(path, []byte("See ![](f.png)"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		d := okDeps()
+		var records []execRecord
+		d.execGH = recordingExecGH(&records)
+		code, _, _ := runWith(t, []string{"f.png", "--", "pr", "create", "--body-file", path}, d)
+		if code != 0 || len(records) != 1 || !strings.Contains(strings.Join(records[0].argv, " "), "See ![](url)") {
+			t.Fatalf("code=%d records=%v", code, records)
+		}
+	})
+
+	t.Run("forwarded repo selects upload repository", func(t *testing.T) {
+		d := okDeps()
+		var owner, name string
+		d.resolveRepo = func(gotOwner, gotName string) (*repo.Info, error) {
+			owner, name = gotOwner, gotName
+			return &repo.Info{Owner: gotOwner, Name: gotName, ID: 1}, nil
+		}
+		var records []execRecord
+		d.execGH = recordingExecGH(&records)
+		code, _, _ := runWith(t, []string{"f.png", "--", "pr", "create", "--body", "b", "--repo", "acme/widgets"}, d)
+		if code != 0 || owner != "acme" || name != "widgets" || len(records) != 1 {
+			t.Fatalf("code=%d repo=%s/%s records=%d", code, owner, name, len(records))
+		}
+	})
+
+	t.Run("attached forwarded repo selects upload repository", func(t *testing.T) {
+		d := okDeps()
+		var owner, name string
+		d.resolveRepo = func(gotOwner, gotName string) (*repo.Info, error) {
+			owner, name = gotOwner, gotName
+			return &repo.Info{Owner: gotOwner, Name: gotName, ID: 1}, nil
+		}
+		code, _, _ := runWith(t, []string{"f.png", "--", "pr", "create", "--body", "b", "-Racme/widgets"}, d)
+		if code != 0 || owner != "acme" || name != "widgets" {
+			t.Fatalf("code=%d repo=%s/%s", code, owner, name)
+		}
+	})
+
+	t.Run("stdin body is consumed before create exec", func(t *testing.T) {
+		d := okDeps()
+		var bodies []string
+		d.execGH = func(argv []string, stdin io.Reader, _ io.Writer, _ io.Writer) int {
+			body, _ := io.ReadAll(stdin)
+			bodies = append(bodies, string(body))
+			return 0
+		}
+		code, _, _ := runWithStdin(t, []string{"f.png", "--", "pr", "create", "--body-file", "-"}, strings.NewReader("See ![](f.png)"), d)
+		if code != 0 || len(bodies) != 1 || bodies[0] != "" {
+			t.Fatalf("code=%d bodies=%q", code, bodies)
+		}
+	})
+
+	t.Run("stdin body is replayed on comment fallback", func(t *testing.T) {
+		d := okDeps()
+		d.probeGH = func([]string) bool { return true }
+		var records []execRecord
+		d.execGH = func(argv []string, stdin io.Reader, _ io.Writer, _ io.Writer) int {
+			records = append(records, execRecord{argv: append([]string{}, argv...)})
+			if len(records) == 1 {
+				return 1
+			}
+			return 0
+		}
+		code, _, _ := runWithStdin(t, []string{"f.png", "--", "issue", "comment", "7", "--body-file", "-"}, strings.NewReader("See ![](f.png)"), d)
+		if code != 0 || len(records) != 2 || !strings.Contains(strings.Join(records[1].argv, " "), "See ![](url)") {
+			t.Fatalf("code=%d records=%v", code, records)
+		}
+	})
+
+	t.Run("malformed forwarded repo fails before resolve", func(t *testing.T) {
+		d := okDeps()
+		resolved := false
+		uploaded := false
+		d.resolveRepo = func(string, string) (*repo.Info, error) {
+			resolved = true
+			return &repo.Info{}, nil
+		}
+		d.newUploader = func(string, io.Writer) uploadFunc {
+			return func(*repo.Info, string) (*upload.Result, error) {
+				uploaded = true
+				return &upload.Result{}, nil
+			}
+		}
+		code, _, _ := runWith(t, []string{"f.png", "--", "pr", "create", "--body", "b", "--repo", "bad"}, d)
+		if code != 1 || resolved || uploaded {
+			t.Fatalf("code=%d resolved=%t uploaded=%t", code, resolved, uploaded)
+		}
+	})
+}
+
+func TestParseRepoFlag(t *testing.T) {
+	tests := []struct {
+		name, flag, wantOwner, wantName string
+		set, wantErr                    bool
+	}{
+		{"not set", "", "", "", false, false},
+		{"valid", "acme/widgets", "acme", "widgets", true, false},
+		{"no slash", "acme", "", "", true, true},
+		{"empty owner", "/widgets", "", "", true, true},
+		{"empty name", "acme/", "", "", true, true},
+		{"extra slash", "acme/widgets/extra", "", "", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owner, name, err := parseRepoFlag(tt.flag, tt.set)
+			if owner != tt.wantOwner || name != tt.wantName || (err != nil) != tt.wantErr {
+				t.Fatalf("parseRepoFlag() = %q, %q, %v", owner, name, err)
+			}
+		})
+	}
+}
+
+func TestBuildArgv(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"body space", []string{"pr", "create", "--body", "text"}, []string{"pr", "create", "--body", "rewritten"}},
+		{"body equals", []string{"pr", "create", "--body=text"}, []string{"pr", "create", "--body", "rewritten"}},
+		{"short body", []string{"issue", "comment", "7", "-b", "text"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
+		{"short body equals", []string{"issue", "comment", "7", "-b=text"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
+		{"short body attached", []string{"issue", "comment", "7", "-btext"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
+		{"body file equals", []string{"issue", "comment", "7", "--body-file=f.md"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
+		{"short body file equals", []string{"issue", "comment", "7", "-F=f.md"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
+		{"short body file attached", []string{"issue", "comment", "7", "-Ff.md"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
+		{"attach equals", []string{"pr", "create", "--attach=img.png"}, []string{"pr", "create", "--body", "rewritten"}},
+		{"preserves other flags", []string{"pr", "create", "--title", "T", "--body", "b"}, []string{"pr", "create", "--title", "T", "--body", "rewritten"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildOurRouteArgv(tt.args, "rewritten")
+			if fmt.Sprint(got) != fmt.Sprint(tt.want) {
+				t.Errorf("buildOurRouteArgv() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	original := []string{"pr", "create", "--fill"}
+	got := buildDelegateArgv(original, []string{"a.png", "b.pdf"})
+	want := []string{"pr", "create", "--fill", "--attach", "a.png", "--attach", "b.pdf"}
+	if fmt.Sprint(got) != fmt.Sprint(want) || fmt.Sprint(original) != "[pr create --fill]" {
+		t.Errorf("buildDelegateArgv() = %v, original = %v", got, original)
+	}
+}
+
+func TestQueryCommentPosted(t *testing.T) {
+	var calls [][]string
+	run := func(binary string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string{binary}, args...))
+		if len(calls) == 1 {
+			return []byte("octo"), nil
+		}
+		return []byte("true\n"), nil
+	}
+	since := time.Date(2026, 9, 1, 12, 34, 56, 123456789, time.FixedZone("CDT", -5*60*60))
+	posted, err := queryCommentPosted(run, "/custom/gh", "issue comment", "octo/widgets", "7", since)
+	if err != nil || !posted {
+		t.Fatalf("queryCommentPosted() = %t, %v", posted, err)
+	}
+	if len(calls) != 2 || calls[0][0] != "/custom/gh" || fmt.Sprint(calls[0][1:]) != "[api user --template {{.login}}]" {
+		t.Fatalf("user call = %v", calls)
+	}
+	if len(calls[1]) != 7 || calls[1][0] != "/custom/gh" || calls[1][1] != "api" || calls[1][2] != "repos/octo/widgets/issues/7/comments?since=2026-09-01T17:34:56.123456789Z" || calls[1][3] != "--paginate" || calls[1][4] != "--slurp" || calls[1][5] != "--jq" || !strings.Contains(calls[1][6], "octo") {
+		t.Fatalf("comments call = %v", calls[1])
+	}
 }
 
 // TestCookieFromValue_BasicAttributes verifies the cookie has the expected fields.
@@ -346,7 +835,7 @@ func TestRun_FlagErrors(t *testing.T) {
 		want string // substring expected on stderr
 	}{
 		{"unknown long flag", []string{"--bogus"}, "unknown flag --bogus"},
-		{"unknown short flag hints --", []string{"-x"}, "use: gh image -- -x"},
+		{"unknown short flag hints dash prefix", []string{"-x"}, "use: gh image ./-x"},
 		{"repo twice", []string{"--repo", "a/b", "--repo", "c/d"}, "specified more than once"},
 		{"repo missing value", []string{"--repo"}, "requires a value"},
 		{"repo empty via =", []string{"--repo=", "img.png"}, "--repo value cannot be empty"},
@@ -438,11 +927,11 @@ func TestRun_Upload(t *testing.T) {
 	t.Run("partial failure exits 1 but prints successes", func(t *testing.T) {
 		d := okDeps()
 		d.newUploader = func(string, io.Writer) uploadFunc {
-			return func(info *repo.Info, p string) (string, error) {
+			return func(info *repo.Info, p string) (*upload.Result, error) {
 				if p == "bad.png" {
-					return "", fmt.Errorf("upload failed")
+					return nil, fmt.Errorf("upload failed")
 				}
-				return "![" + p + "](url)", nil
+				return &upload.Result{URL: "url", Markdown: "![" + p + "](url)"}, nil
 			}
 		}
 		code, out, errOut := runWith(t, []string{"good.png", "bad.png"}, d)
@@ -469,7 +958,7 @@ func TestRun_Upload(t *testing.T) {
 	t.Run("session resolution failure exits 1", func(t *testing.T) {
 		d := okDeps()
 		d.newUploader = func(string, io.Writer) uploadFunc {
-			return func(*repo.Info, string) (string, error) { return "", fmt.Errorf("no token") }
+			return func(*repo.Info, string) (*upload.Result, error) { return nil, fmt.Errorf("no token") }
 		}
 		code, _, errOut := runWith(t, []string{"a.png"}, d)
 		if code != 1 || !strings.Contains(errOut, "Error uploading a.png: no token") {
@@ -480,12 +969,12 @@ func TestRun_Upload(t *testing.T) {
 		d := okDeps()
 		d.newUploader = func(tokenFlag string, stderr io.Writer) uploadFunc {
 			notified := false
-			return func(info *repo.Info, p string) (string, error) {
+			return func(info *repo.Info, p string) (*upload.Result, error) {
 				if !notified {
 					notified = true
 					fmt.Fprintln(stderr, "Note: fast upload unavailable (HTTP 404); using browser session.")
 				}
-				return "![" + p + "](url)", nil
+				return &upload.Result{URL: "url", Markdown: "![" + p + "](url)"}, nil
 			}
 		}
 		code, out, errOut := runWith(t, []string{"a.png", "b.png"}, d)
@@ -513,21 +1002,21 @@ func TestRun_Upload(t *testing.T) {
 			t.Errorf("resolveRepo got %q/%q, want acme/widgets", gotOwner, gotName)
 		}
 	})
-	t.Run("-- terminator treats dash-file as a path and infers repo", func(t *testing.T) {
+	t.Run("bare -- leaves ./ dash-file as a path and infers repo", func(t *testing.T) {
 		var gotOwner, gotName string
 		d := okDeps()
 		d.resolveRepo = func(owner, name string) (*repo.Info, error) {
 			gotOwner, gotName = owner, name
 			return &repo.Info{Owner: "octo", Name: "hello", ID: 1}, nil
 		}
-		code, out, _ := runWith(t, []string{"--", "-shot.png"}, d)
+		code, out, _ := runWith(t, []string{"./-shot.png", "--"}, d)
 		if code != 0 {
 			t.Fatalf("code = %d, want 0", code)
 		}
 		if gotOwner != "" || gotName != "" {
 			t.Errorf("expected inference path (empty owner/name), got %q/%q", gotOwner, gotName)
 		}
-		if !strings.Contains(out, "![-shot.png](url)") {
+		if !strings.Contains(out, "![./-shot.png](url)") {
 			t.Errorf("stdout = %q", out)
 		}
 	})
@@ -589,7 +1078,7 @@ func TestUseBearerRoute(t *testing.T) {
 
 func TestProductionDeps_WiringComplete(t *testing.T) {
 	d := productionDeps()
-	if d.resolveRepo == nil || d.newUploader == nil || d.extractToken == nil || d.checkToken == nil || d.newDownloader == nil {
+	if d.resolveRepo == nil || d.newUploader == nil || d.extractToken == nil || d.checkToken == nil || d.newDownloader == nil || d.probeGH == nil || d.execGH == nil || d.checkCommentPosted == nil {
 		t.Fatal("productionDeps left a boundary unwired")
 	}
 }
@@ -612,18 +1101,6 @@ func TestClassifySubcommand(t *testing.T) {
 			name:           "check-token selected",
 			paths:          []string{"check-token"},
 			wantSubcommand: "check-token",
-		},
-		{
-			name:           "double-dash treats check-token as filename",
-			paths:          []string{"check-token"},
-			opts:           cliOptions{firstPosAfterDoubleDash: true},
-			wantSubcommand: "",
-		},
-		{
-			name:           "double-dash treats extract-token as filename",
-			paths:          []string{"extract-token"},
-			opts:           cliOptions{firstPosAfterDoubleDash: true},
-			wantSubcommand: "",
 		},
 		{
 			name:            "extract-token with extra args errors",
@@ -664,12 +1141,6 @@ func TestClassifySubcommand(t *testing.T) {
 			name:           "download selected",
 			paths:          []string{"download", "https://github.com/user-attachments/assets/x"},
 			wantSubcommand: "download",
-		},
-		{
-			name:           "double-dash treats download as filename",
-			paths:          []string{"download"},
-			opts:           cliOptions{firstPosAfterDoubleDash: true},
-			wantSubcommand: "",
 		},
 		{
 			name:            "download with repo flag errors",
@@ -954,14 +1425,14 @@ func TestRun_DownloadFlagParsing(t *testing.T) {
 		}
 	})
 
-	t.Run("-- makes download a filename, not the subcommand", func(t *testing.T) {
+	t.Run("right side of -- is not a filename", func(t *testing.T) {
 		dl := &stubDownloader{}
-		code, out, _ := runWith(t, []string{"--", "download"}, depsWith(dl))
-		if code != 0 || !strings.Contains(out, "![download](url)") {
-			t.Fatalf("code=%d out=%q — expected an upload of a file named download", code, out)
+		code, out, errOut := runWith(t, []string{"--", "download"}, depsWith(dl))
+		if code != 1 || out != "" || !strings.Contains(errOut, "no files specified before --") {
+			t.Fatalf("code=%d out=%q stderr=%q", code, out, errOut)
 		}
 		if len(dl.saved) != 0 {
-			t.Error("download ran despite the -- terminator")
+			t.Error("download ran despite passthrough rejection")
 		}
 	})
 
