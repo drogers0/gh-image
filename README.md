@@ -19,8 +19,6 @@
 
 `gh-image` drops a screenshot — or any GitHub-supported file like a PDF, zip, or log — into a bug report, README, or Slack thread without leaving the terminal, and uploads on private repos stay private. Images render as inline embeds, videos as inline players, and other files as download links.
 
-It does everything `gh --attach` does, and the cases it turns down: any file type GitHub accepts, repositories you can only read, a link on its own, and fetching an attachment back.
-
 ```console
 $ gh image screenshot.png
 ![screenshot.png](https://github.com/user-attachments/assets/88f4599a-…-bc24)
@@ -28,6 +26,18 @@ $ gh image screenshot.png
 $ gh image report.pdf
 [report.pdf](https://github.com/user-attachments/files/123456/report.pdf)
 ```
+
+> [!NOTE]
+> **GitHub shipped first-party attachment support on `TBD-RELEASE-DATE`.** To attach an image or video to an issue or PR on a repository you can push to, update to `gh` `TBD-VERSION` or later and use [`--attach`](https://cli.github.com/manual/gh_issue_comment) — for most people that is enough.
+
+`gh-image` covers what that flag does not:
+
+- **Any file type GitHub accepts** — PDFs, zips, logs, CSVs, source files. `--attach` takes nine image and video extensions.
+- **Repositories you can only read** — attach a screenshot to a bug report on a project you do not have push access to.
+- **A link on its own** — for a README, a commit message, a Slack thread, or anywhere that isn't an issue or PR.
+- **Fetching attachments back down** — `gh image download` pulls a `user-attachments` file to disk.
+
+It also wraps `--attach` rather than competing with it: pass a `gh` command after `--` and the eligible files go through `gh` itself. See [Post it in one command](#post-it-in-one-command).
 
 ## Installation
 
