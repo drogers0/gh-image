@@ -258,9 +258,8 @@ anything about upstream's policy.
   so upstream rewording cannot break the decision.
 - **Local route.** Uploads through `internal/upload` as usual, rewrites the body's
   references with `internal/rewrite`, and re-executes the original argv against the
-  rewritten body. The `Router` is left as it is: the delegation attempt was already a
-  bearer attempt, so a refusal costs one duplicate request before the session route,
-  which is cheaper than a rule that would have to know why `gh` said no.
+  rewritten body. The `Router` is unchanged, so a refusal costs one duplicate bearer
+  request before the session route.
 
 `gh` itself is located the way `gh` locates itself — `GH_PATH` when set, otherwise
 `gh` from `PATH` — so the binary that launched the extension is the one invoked.
