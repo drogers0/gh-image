@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/browserutils/kooky v0.2.10
 	github.com/moond4rk/hackbrowserdata v1.1.1-0.20260817023946-adfb6d993ef8
+	github.com/yuin/goldmark v1.8.5
 )
 
 require (
