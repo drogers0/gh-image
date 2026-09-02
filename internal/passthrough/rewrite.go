@@ -3,6 +3,8 @@ package passthrough
 import (
 	"bytes"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -28,7 +30,8 @@ func RewriteBody(src string, paths, urls, appendMarkdowns []string) (string, err
 	matched := make([]bool, len(paths))
 	pathIndexes := make(map[string][]int, len(paths))
 	for i, path := range paths {
-		pathIndexes[path] = append(pathIndexes[path], i)
+		key := absPath(path)
+		pathIndexes[key] = append(pathIndexes[key], i)
 	}
 	pathUses := make(map[string]int, len(pathIndexes))
 	var walkErr error
@@ -50,11 +53,12 @@ func RewriteBody(src string, paths, urls, appendMarkdowns []string) (string, err
 			return ast.WalkContinue, nil
 		}
 
-		lookup := string(dest)
-		indexes := pathIndexes[lookup]
-		if len(indexes) == 0 {
-			lookup = unescapeDestination(dest)
-			indexes = pathIndexes[lookup]
+		lookup, indexes := "", []int(nil)
+		for _, candidate := range destinationKeys(dest) {
+			if found := pathIndexes[candidate]; len(found) > 0 {
+				lookup, indexes = candidate, found
+				break
+			}
 		}
 		if len(indexes) == 0 {
 			return ast.WalkContinue, nil
@@ -94,6 +98,39 @@ func RewriteBody(src string, paths, urls, appendMarkdowns []string) (string, err
 		}
 	}
 	return out, nil
+}
+
+// absPath keys a path for matching. Both sides resolve through it, so a body
+// that writes shot.png matches a command line that wrote ./shot.png, the way
+// upstream's own rewriter matches on the absolute path.
+func absPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return abs
+}
+
+// destinationKeys returns the match keys a markdown destination can produce:
+// as written, and with markdown's backslash escapes removed. A destination
+// naming somewhere other than the filesystem produces none.
+func destinationKeys(dest []byte) []string {
+	raw := string(dest)
+	if raw == "" || strings.HasPrefix(raw, "#") || isRemoteDestination(raw) {
+		return nil
+	}
+	keys := []string{absPath(raw)}
+	if unescaped := unescapeDestination(dest); unescaped != raw {
+		keys = append(keys, absPath(unescaped))
+	}
+	return keys
+}
+
+// isRemoteDestination reports whether dest carries a URL scheme. A one-letter
+// scheme is a Windows drive rather than a protocol.
+func isRemoteDestination(dest string) bool {
+	parsed, err := url.Parse(dest)
+	return err == nil && len(parsed.Scheme) > 1
 }
 
 func unescapeDestination(dest []byte) string {

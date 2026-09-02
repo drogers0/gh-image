@@ -646,7 +646,7 @@ func runOurRoute(cl *passthrough.Result, files, ghArgv []string, repoFlag string
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 1
 	}
-	return d.execGH(buildOurRouteArgv(ghArgv, rewritten), stdin, stdout, stderr)
+	return d.execGH(buildOurRouteArgv(ghArgv, cl.BodyIndexes, rewritten), stdin, stdout, stderr)
 }
 
 func buildDelegateArgv(ghArgv, files []string) []string {
@@ -658,20 +658,18 @@ func buildDelegateArgv(ghArgv, files []string) []string {
 	return out
 }
 
-func buildOurRouteArgv(ghArgv []string, body string) []string {
-	var out []string
-	skip := false
-	for _, arg := range ghArgv {
-		if skip {
-			skip = false
-			continue
-		}
-		switch {
-		case arg == "--body" || arg == "-b" || arg == "--body-file" || arg == "-F" || arg == "--attach":
-			skip = true
-		case strings.HasPrefix(arg, "--body=") || strings.HasPrefix(arg, "-b=") || strings.HasPrefix(arg, "--body-file=") || strings.HasPrefix(arg, "-F=") || strings.HasPrefix(arg, "--attach="):
-		case strings.HasPrefix(arg, "-b") && !strings.HasPrefix(arg, "--") || strings.HasPrefix(arg, "-F") && !strings.HasPrefix(arg, "--"):
-		default:
+// buildOurRouteArgv swaps the caller's body flags for the rewritten body,
+// dropping the exact argv positions Classify recorded. Matching by position
+// rather than by spelling leaves another flag's value alone even when that
+// value reads like a flag of ours, such as --title -Fix.
+func buildOurRouteArgv(ghArgv []string, bodyIndexes []int, body string) []string {
+	drop := make(map[int]bool, len(bodyIndexes))
+	for _, i := range bodyIndexes {
+		drop[i] = true
+	}
+	out := make([]string, 0, len(ghArgv)+2)
+	for i, arg := range ghArgv {
+		if !drop[i] {
 			out = append(out, arg)
 		}
 	}

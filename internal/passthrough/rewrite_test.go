@@ -58,6 +58,34 @@ func TestRewriteBody(t *testing.T) {
 	}
 }
 
+// A path spelled one way on the command line and another in the body names the
+// same file, and upstream's rewriter matches it, so ours has to as well or the
+// same document stops working down one of the two routes.
+func TestRewriteBody_PathSpellings(t *testing.T) {
+	tests := []struct {
+		name, src, path string
+		want            string
+	}{
+		{"body omits ./", "see ![x](shot.png)", "./shot.png", "see ![x](https://url)"},
+		{"command line omits ./", "see ![x](./shot.png)", "shot.png", "see ![x](https://url)"},
+		{"redundant segments", "see ![x](./docs/../shot.png)", "shot.png", "see ![x](https://url)"},
+		{"different file still appends", "see ![x](other.png)", "shot.png", "see ![x](other.png)\n\nAPPENDED"},
+		{"remote destination is not a path", "see ![x](https://example.com/shot.png)", "shot.png", "see ![x](https://example.com/shot.png)\n\nAPPENDED"},
+		{"anchor is not a path", "see [x](#shot.png)", "shot.png", "see [x](#shot.png)\n\nAPPENDED"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := RewriteBody(tt.src, []string{tt.path}, []string{"https://url"}, []string{"APPENDED"})
+			if err != nil {
+				t.Fatalf("RewriteBody() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("RewriteBody() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRewriteBody_DuplicatePaths(t *testing.T) {
 	got, err := RewriteBody("![one](./shot.png) ![two](./shot.png)",
 		[]string{"./shot.png", "./shot.png"},

@@ -1,6 +1,7 @@
 package passthrough
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -41,8 +42,6 @@ func TestClassifyFlags(t *testing.T) {
 		{"short body file space", []string{"pr", "create", "-F", "body.md"}, "-F", "body.md", "", ""},
 		{"short body file equals", []string{"pr", "create", "-F=body.md"}, "-F", "body.md", "", ""},
 		{"short body file attached", []string{"pr", "create", "-Fbody.md"}, "-F", "body.md", "", ""},
-		{"attach space", []string{"pr", "create", "--attach", "file.png"}, "", "", "", ""},
-		{"attach equals", []string{"pr", "create", "--attach=file.png"}, "", "", "", ""},
 		{"repo long space", []string{"pr", "create", "--repo", "owner/name"}, "", "", "owner/name", ""},
 		{"repo short space", []string{"pr", "create", "-R", "owner/name"}, "", "", "owner/name", ""},
 		{"repo long equals", []string{"pr", "create", "--repo=owner/name"}, "", "", "owner/name", ""},
@@ -87,13 +86,47 @@ func TestClassifyTargetAndErrors(t *testing.T) {
 		{"pr", "create", "--body-file="},
 		{"pr", "create", "--repo"},
 		{"pr", "create", "--repo="},
-		{"pr", "create", "--attach"},
-		{"pr", "create", "--attach", "--title"},
-		{"pr", "create", "--attach", ""},
-		{"pr", "create", "--attach="},
 	} {
 		if _, err := Classify(args); err == nil {
 			t.Errorf("Classify(%v) error = nil", args)
 		}
+	}
+
+	// --attach right of -- would be dropped on the gh-image route, losing the
+	// file without a word, so it is refused rather than silently honoured on
+	// one route only.
+	for _, args := range [][]string{
+		{"pr", "create", "--attach", "file.png"},
+		{"pr", "create", "--attach=file.png"},
+	} {
+		if _, err := Classify(args); err == nil || !strings.Contains(err.Error(), "list the files left of it") {
+			t.Errorf("Classify(%v) error = %v, want an --attach refusal", args, err)
+		}
+	}
+}
+
+func TestClassifyBodyIndexes(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []int
+	}{
+		{"space form takes flag and value", []string{"pr", "create", "--body", "text"}, []int{2, 3}},
+		{"equals form takes one position", []string{"pr", "create", "--body=text"}, []int{2}},
+		{"attached shorthand takes one position", []string{"pr", "create", "-btext"}, []int{2}},
+		{"every occurrence is recorded", []string{"pr", "create", "--body-file", "f.md", "-b", "text"}, []int{2, 3, 4, 5}},
+		{"a flag-shaped value of another flag is left alone", []string{"pr", "create", "--title", "-Fix", "--body", "t"}, []int{4, 5}},
+		{"no body flag records nothing", []string{"pr", "create", "--fill"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Classify(tt.args)
+			if err != nil {
+				t.Fatalf("Classify() error = %v", err)
+			}
+			if fmt.Sprint(got.BodyIndexes) != fmt.Sprint(tt.want) {
+				t.Errorf("BodyIndexes = %v, want %v", got.BodyIndexes, tt.want)
+			}
+		})
 	}
 }

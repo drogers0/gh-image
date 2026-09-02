@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/drogers0/gh-image/internal/download"
+	"github.com/drogers0/gh-image/internal/passthrough"
 	"github.com/drogers0/gh-image/internal/repo"
 	"github.com/drogers0/gh-image/internal/upload"
 )
@@ -534,12 +535,17 @@ func TestBuildArgv(t *testing.T) {
 		{"body file equals", []string{"issue", "comment", "7", "--body-file=f.md"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
 		{"short body file equals", []string{"issue", "comment", "7", "-F=f.md"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
 		{"short body file attached", []string{"issue", "comment", "7", "-Ff.md"}, []string{"issue", "comment", "7", "--body", "rewritten"}},
-		{"attach equals", []string{"pr", "create", "--attach=img.png"}, []string{"pr", "create", "--body", "rewritten"}},
 		{"preserves other flags", []string{"pr", "create", "--title", "T", "--body", "b"}, []string{"pr", "create", "--title", "T", "--body", "rewritten"}},
+		{"leaves a flag-shaped value alone", []string{"pr", "create", "--title", "-Fix crash", "--body", "b"}, []string{"pr", "create", "--title", "-Fix crash", "--body", "rewritten"}},
+		{"drops every body flag", []string{"pr", "create", "--body-file", "f.md", "-b", "text"}, []string{"pr", "create", "--body", "rewritten"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildOurRouteArgv(tt.args, "rewritten")
+			cl, err := passthrough.Classify(tt.args)
+			if err != nil {
+				t.Fatalf("Classify() error = %v", err)
+			}
+			got := buildOurRouteArgv(tt.args, cl.BodyIndexes, "rewritten")
 			if fmt.Sprint(got) != fmt.Sprint(tt.want) {
 				t.Errorf("buildOurRouteArgv() = %v, want %v", got, tt.want)
 			}

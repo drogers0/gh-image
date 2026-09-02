@@ -22,6 +22,10 @@ type Result struct {
 	BodyValue  string
 	Repo       string
 	TargetNum  string
+	// BodyIndexes are the ghArgv positions the body flags occupy, flags and
+	// their values alike. Rebuilding the argv drops exactly these, so a value
+	// that merely looks like a flag is never mistaken for one.
+	BodyIndexes []int
 }
 
 var known = map[string]Kind{
@@ -51,11 +55,17 @@ func Classify(ghArgv []string) (*Result, error) {
 	for i := 2; i < len(ghArgv); i++ {
 		arg := ghArgv[i]
 		switch {
+		// --title is the one upstream flag whose value plausibly starts with a
+		// dash ("-Fix the crash"). Consuming it here keeps that value from
+		// reading as one of the flags below, the way gh's own parser treats it.
+		case arg == "--title" || arg == "-t":
+			i++
 		case arg == "--body" || arg == "-b" || arg == "--body-file" || arg == "-F":
 			result.BodyFlag = arg
 			if i+1 >= len(ghArgv) {
 				return nil, fmt.Errorf("%s requires a value", arg)
 			}
+			result.BodyIndexes = append(result.BodyIndexes, i, i+1)
 			i++
 			result.BodyValue = ghArgv[i]
 			if isBodyFileFlag(arg) && result.BodyValue == "" {
@@ -64,13 +74,16 @@ func Classify(ghArgv []string) (*Result, error) {
 		case strings.HasPrefix(arg, "--body=") || strings.HasPrefix(arg, "-b=") ||
 			strings.HasPrefix(arg, "--body-file=") || strings.HasPrefix(arg, "-F="):
 			result.BodyFlag, result.BodyValue = splitFlag(arg)
+			result.BodyIndexes = append(result.BodyIndexes, i)
 			if isBodyFileFlag(result.BodyFlag) && result.BodyValue == "" {
 				return nil, fmt.Errorf("%s value cannot be empty", result.BodyFlag)
 			}
 		case strings.HasPrefix(arg, "-b") && !strings.HasPrefix(arg, "--"):
 			result.BodyFlag, result.BodyValue = "-b", arg[2:]
+			result.BodyIndexes = append(result.BodyIndexes, i)
 		case strings.HasPrefix(arg, "-F") && !strings.HasPrefix(arg, "--"):
 			result.BodyFlag, result.BodyValue = "-F", arg[2:]
+			result.BodyIndexes = append(result.BodyIndexes, i)
 			if result.BodyValue == "" {
 				return nil, fmt.Errorf("%s value cannot be empty", result.BodyFlag)
 			}
@@ -97,21 +110,10 @@ func Classify(ghArgv []string) (*Result, error) {
 			if result.Repo == "" {
 				return nil, fmt.Errorf("-R value cannot be empty")
 			}
-		case arg == "--attach":
-			if i+1 >= len(ghArgv) {
-				return nil, fmt.Errorf("%s requires a value", arg)
-			}
-			i++
-			if looksLikeFlag(ghArgv[i]) {
-				return nil, fmt.Errorf("%s requires a value", arg)
-			}
-			if ghArgv[i] == "" {
-				return nil, fmt.Errorf("%s value cannot be empty", arg)
-			}
-		case strings.HasPrefix(arg, "--attach="):
-			if _, value := splitFlag(arg); value == "" {
-				return nil, fmt.Errorf("--attach value cannot be empty")
-			}
+		// Files come from the left of --, which both routes honour. Silently
+		// dropping an --attach here would lose a file on the gh-image route.
+		case arg == "--attach" || strings.HasPrefix(arg, "--attach="):
+			return nil, fmt.Errorf("--attach is not supported right of --; list the files left of it instead: gh image <file>... -- %s", key)
 		case result.TargetNum == "" && !strings.HasPrefix(arg, "-"):
 			result.TargetNum = arg
 		}
