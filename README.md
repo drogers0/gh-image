@@ -147,47 +147,17 @@ Existing files are overwritten unless `--no-clobber` is passed, which writes `na
 
 ### Post it in one command
 
-Anything after `--` is a `gh` invocation, forwarded as you wrote it. `gh-image` uploads the files first and makes sure the resulting links are in the body:
+Anything after `--` is a `gh` command, forwarded as written. The files upload first and their links land in the body:
 
 ```bash
-# Attach a screenshot to a comment
-gh image bug.png -- issue comment 42 --body-file repro.md
-
-# Open a PR with a design doc attached
-gh image diagram.pdf -- pr create --fill --body-file design.md
-
-# Several files, several references
+gh image bug.png              -- issue comment 42 --body-file repro.md
+gh image diagram.pdf          -- pr create --fill --body-file design.md
 gh image before.png after.png -- issue create --title "Layout breaks under 600px" --body-file report.md
 ```
 
-Write the body pointing at the files on disk, and the references are repointed at the uploaded assets:
+Point the body at the files on disk — `![before](./before.png)` — and those references are repointed at the uploaded assets; a file the body never mentions is appended to the end. A filename beginning with a dash is written `./-name.png`, since `--` now starts the `gh` command.
 
-```markdown
-The picker lays out correctly on a wide window:
-
-![before](./before.png)
-
-Below 600px the art names wrap underneath the thumbnails:
-
-![after](./after.png)
-```
-
-A file the body never mentions is appended to the end.
-
-> [!NOTE]
-> A filename beginning with a dash is written `./-name.png`, since `--` now starts the `gh` command.
-
-Composing by hand still works, and fits when the link belongs somewhere other than an issue or PR:
-
-```bash
-gh issue create \
-  --title "Login button stuck in loading state" \
-  --body "Repro on staging:
-
-$(gh image bug.png)
-
-Happens consistently after the third click."
-```
+For a link that belongs somewhere other than an issue or PR, compose by hand instead: `--body "$(gh image bug.png)"`.
 
 ## Use with AI agents
 
