@@ -28,7 +28,7 @@ $ gh image report.pdf
 ```
 
 > [!NOTE]
-> **GitHub shipped first-party attachment support on `TBD-RELEASE-DATE`.** To attach an image or video to an issue or PR on a repository you can push to, update to `gh` `TBD-VERSION` or later and use [`--attach`](https://cli.github.com/manual/gh_issue_comment) — for most people that is enough.
+> **GitHub shipped first-party attachment support on 2026-09-01.** To attach an image or video to an issue or PR on a repository you can push to, update to `gh` v2.99.0 or later and use [`--attach`](https://cli.github.com/manual/gh_issue_comment) — for most people that is enough.
 
 `gh-image` covers what that flag does not:
 

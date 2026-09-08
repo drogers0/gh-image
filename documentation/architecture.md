@@ -243,13 +243,16 @@ func (c *Client) Stream(ref Ref, w io.Writer) (int64, error)
 Runs the `gh` command given after `--`, choosing between two routes without encoding
 anything about upstream's policy.
 
-- **Capability probe.** Reads `gh issue comment --help` once per run and looks for
+- **Capability probe.** Reads `--help` for the forwarded subcommand and looks for
   `--attach`. A feature probe rather than a version comparison, so backports and forks
-  behave correctly.
+  behave correctly. It does not run at all when the route is already decided — a
+  `create` carrying a body flag never probes.
 - **Route choice.** For `comment` and `edit`, `--attach <file>` is appended to the
-  forwarded argv and `gh` is executed. For `create`, delegation is skipped entirely:
-  a create has no pre-existing resource to inspect, so a partial upload could not be
-  distinguished from a clean failure, and a retry would open a second issue or PR.
+  forwarded argv and `gh` is executed. A `create` delegates only when no body flag was
+  given, since `--fill` and the editor leave nothing to rewrite; a `create` with a body
+  is handled locally, because it has no pre-existing resource to inspect afterwards, so
+  a partial upload could not be distinguished from a clean failure and a retry would
+  open a second issue or PR.
 - **Refusal handling.** A non-zero exit is not assumed to mean nothing happened —
   upstream writes the body when at least one asset uploaded, including after a partial
   failure. The target is read once, looking for a comment or revision authored by the
