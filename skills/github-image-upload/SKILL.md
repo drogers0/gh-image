@@ -39,8 +39,8 @@ Check these first. Report failures — do not install or authenticate for the us
 
 2. `gh extension list | grep 'drogers0/gh-image' && gh image --version`
 
-   Needs v1.1.0+ (`--version` prints `gh-image 1.2.0`; compare semantically, so
-   `1.10.0` ≥ `1.1.0`). Missing → the user runs `gh extension install
+   Needs v1.4.0+, the release that added the `--` form used below (`--version`
+   prints `gh-image 1.4.0`; compare semantically, so `1.10.0` ≥ `1.4.0`). Missing → the user runs `gh extension install
    drogers0/gh-image`. Older → the user runs `gh extension upgrade gh-image`. `dev` →
    a local build, warn and continue. Never run install or upgrade yourself.
 
