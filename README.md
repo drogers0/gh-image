@@ -28,7 +28,13 @@ $ gh image report.pdf
 ```
 
 > [!NOTE]
-> **GitHub shipped first-party attachment support on 2026-09-01.** To attach an image or video to an issue or PR on a repository you can push to, update to `gh` v2.99.0 or later and use [`--attach`](https://cli.github.com/manual/gh_issue_comment) — for most people that is enough.
+> **GitHub shipped first-party attachment support on 2026-09-01.** To attach an image or video to an issue or PR on a repository you can push to, update to `gh` v2.99.0 or later and use `--attach` — for most people that is enough. It works on
+> [`gh issue create`](https://cli.github.com/manual/gh_issue_create),
+> [`gh issue edit`](https://cli.github.com/manual/gh_issue_edit),
+> [`gh issue comment`](https://cli.github.com/manual/gh_issue_comment),
+> [`gh pr create`](https://cli.github.com/manual/gh_pr_create),
+> [`gh pr edit`](https://cli.github.com/manual/gh_pr_edit) and
+> [`gh pr comment`](https://cli.github.com/manual/gh_pr_comment).
 
 `gh-image` covers what that flag does not:
 
