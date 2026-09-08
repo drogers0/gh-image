@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/drogers0/gh-image/internal/cookies"
 	"github.com/drogers0/gh-image/internal/download"
+	"github.com/drogers0/gh-image/internal/passthrough"
 	"github.com/drogers0/gh-image/internal/repo"
 	"github.com/drogers0/gh-image/internal/session"
 	"github.com/drogers0/gh-image/internal/upload"
@@ -18,6 +23,7 @@ import (
 
 const usage = `Usage:
   gh image [--repo owner/repo] [--token <value>] <file-path>...
+  gh image [--repo owner/repo] [--token <value>] <file-path>... -- <gh-command...>
   gh image download [--output <file>|-] [--output-dir <dir>] [--no-clobber] [--token <value>] <url>...
   gh image extract-token
   gh image check-token [--token <value>]
@@ -29,12 +35,17 @@ var version = "dev"
 // sessionTokenEnvVar supplies the user_session cookie value without a flag.
 const sessionTokenEnvVar = "GH_SESSION_TOKEN"
 
+// clockSkewAllowance widens the posted-comment check (issue #58: "allowing for
+// clock skew"). Too narrow risks a duplicate post; too wide merely flags a
+// recent comment by the same viewer, which stops before any duplicate.
+const clockSkewAllowance = 2 * time.Minute
+
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, productionDeps()))
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, productionDeps()))
 }
 
-// uploadFunc uploads one file and returns its markdown reference.
-type uploadFunc func(info *repo.Info, path string) (string, error)
+// uploadFunc uploads one file and returns its asset result.
+type uploadFunc func(info *repo.Info, path string) (*upload.Result, error)
 
 // deps are the I/O boundaries run() depends on; productionDeps wires the real ones,
 // tests inject stubs so the orchestration spine runs without network/subprocess/exit.
@@ -52,6 +63,15 @@ type deps struct {
 	// both routes and resolves each lazily, so a run that stays on the bearer
 	// token never touches the browser's cookie store.
 	newDownloader func(tokenFlag string, stderr io.Writer) downloader
+	// probeGH reports whether the given gh subcommand argv supports --attach.
+	// Called at most once per passthrough run.
+	probeGH func(subcommandArgv []string) bool
+	// execGH runs gh with the given argv. Returns gh's exit code.
+	execGH func(argv []string, stdin io.Reader, stdout, stderr io.Writer) int
+	// checkCommentPosted reports whether the viewer posted a comment on (repo,
+	// targetNum) at or after since. A false return, including on error, means
+	// nothing was confirmed posted.
+	checkCommentPosted func(subcommand, repo, targetNum string, since time.Time) (bool, error)
 }
 
 // downloader is the injected download boundary. Save writes to disk, Stream
@@ -62,6 +82,7 @@ type downloader interface {
 }
 
 func productionDeps() deps {
+	ghBin := resolveGHBin()
 	return deps{
 		resolveRepo: repo.Resolve,
 		newUploader: func(tokenFlag string, stderr io.Writer) uploadFunc {
@@ -86,12 +107,12 @@ func productionDeps() deps {
 				},
 				func(msg string) { fmt.Fprintln(stderr, msg) },
 			)
-			return func(info *repo.Info, path string) (string, error) {
+			return func(info *repo.Info, path string) (*upload.Result, error) {
 				res, err := router.Upload(info.Owner, info.Name, info.ID, path)
 				if err != nil {
-					return "", err
+					return nil, err
 				}
-				return res.Markdown, nil
+				return res, nil
 			}
 		},
 		// extract-token stays offline: pass nil so selection skips network validation.
@@ -115,16 +136,60 @@ func productionDeps() deps {
 				func(msg string) { fmt.Fprintln(stderr, msg) },
 			)
 		},
+		probeGH: func(subcommandArgv []string) bool {
+			argv := append(append([]string{}, subcommandArgv...), "--help")
+			out, err := exec.Command(ghBin, argv...).Output()
+			return err == nil && bytes.Contains(out, []byte("--attach"))
+		},
+		execGH: func(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+			cmd := exec.Command(ghBin, argv...)
+			cmd.Stdin = stdin
+			cmd.Stdout = stdout
+			cmd.Stderr = stderr
+			if err := cmd.Run(); err != nil {
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					return exitErr.ExitCode()
+				}
+				fmt.Fprintf(stderr, "Error running gh: %v\n", err)
+				return 1
+			}
+			return 0
+		},
+		checkCommentPosted: func(subcommand, repo, targetNum string, since time.Time) (bool, error) {
+			return queryCommentPosted(execGHOutput, ghBin, subcommand, repo, targetNum, since)
+		},
 	}
 }
 
-func run(args []string, stdout, stderr io.Writer, d deps) int {
+func execGHOutput(binary string, args ...string) ([]byte, error) {
+	return exec.Command(binary, args...).Output()
+}
+
+func queryCommentPosted(run func(string, ...string) ([]byte, error), binary, subcommand, repo, targetNum string, since time.Time) (bool, error) {
+	viewerOut, err := run(binary, "api", "user", "--template", "{{.login}}")
+	if err != nil {
+		return false, fmt.Errorf("gh api user: %w", err)
+	}
+	login := strings.TrimSpace(string(viewerOut))
+	sinceStr := since.UTC().Format(time.RFC3339Nano)
+	jq := fmt.Sprintf(`def timestamp($s): ($s | capture("^(?<seconds>[^.]+)(?:\\.(?<fraction>[0-9]+))?Z$")) as $parts | (($parts.seconds + "Z") | fromdateiso8601) + (("0." + ($parts.fraction // "0")) | tonumber); any(.[][]; (.user.login == "%s") and (timestamp(.created_at) >= timestamp("%s")))`, login, sinceStr)
+	out, err := run(binary, "api",
+		fmt.Sprintf("repos/%s/issues/%s/comments?since=%s", repo, targetNum, sinceStr),
+		"--paginate", "--slurp", "--jq", jq)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == "true", nil
+}
+
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer, d deps) int {
 	var repoFlag string
 	var repoSet bool
 	var tokenFlag string
 	var tokenSet bool
 	var paths []string
-	var firstPosAfterDoubleDash bool
+	var ghArgv []string
 	var output, outputDir string
 	var outputSet, outputDirSet, noClobber bool
 
@@ -133,12 +198,9 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// After "--", everything is a positional arg
+		// After "--", everything is forwarded to gh.
 		if flagsDone {
-			if len(paths) == 0 {
-				firstPosAfterDoubleDash = true
-			}
-			paths = append(paths, arg)
+			ghArgv = append(ghArgv, arg)
 			continue
 		}
 
@@ -211,6 +273,9 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		case arg == "--help" || arg == "-h":
 			fmt.Fprintf(stdout, "%s\n\n", usage)
 			fmt.Fprintln(stdout, "Upload images and files to GitHub and print markdown references.")
+			fmt.Fprintln(stdout, "Passthrough mode uploads files before -- and forwards supported gh create, edit, or comment commands.")
+			fmt.Fprintln(stdout, "Create commands with a body use gh-image rewriting; create commands without a body delegate when gh supports --attach.")
+			fmt.Fprintln(stdout, "Comment and edit commands delegate first when possible, then fall back to gh-image rewriting if needed.")
 			fmt.Fprintln(stdout)
 			fmt.Fprintln(stdout, "The --repo flag is optional. If omitted, the repository is")
 			fmt.Fprintln(stdout, "inferred from the git remote in the current directory.")
@@ -238,13 +303,12 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 			fmt.Fprintln(stdout, "derived from the URL. Downloads authenticate with the same session token")
 			fmt.Fprintln(stdout, "as uploads (--token, GH_SESSION_TOKEN, or the browser cookie).")
 			fmt.Fprintln(stdout)
-			fmt.Fprintln(stdout, "Use -- to separate flags from filenames starting with a dash:")
-			fmt.Fprintln(stdout, "  gh image -- -screenshot.png")
+			fmt.Fprintln(stdout, "Use ./ before filenames that start with a dash, such as ./-screenshot.png.")
 			return 0
 		case strings.HasPrefix(arg, "-") && arg != "-":
 			fmt.Fprintf(stderr, "Error: unknown flag %s\n", arg)
 			if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
-				fmt.Fprintf(stderr, "If this is a filename, use: gh image -- %s\n", arg)
+				fmt.Fprintf(stderr, "If this is a filename, use: gh image ./%s\n", strings.TrimPrefix(arg, "./"))
 			}
 			fmt.Fprintf(stderr, "Run 'gh image --help' for usage.\n")
 			return 1
@@ -253,14 +317,31 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 		}
 	}
 
+	if len(ghArgv) > 0 {
+		if len(paths) == 0 {
+			fmt.Fprintf(stderr, "Error: no files specified before --\n")
+			return 1
+		}
+		for _, path := range paths {
+			if path == "" {
+				fmt.Fprintf(stderr, "Error: empty file path\n")
+				return 1
+			}
+		}
+		if outputSet || outputDirSet || noClobber {
+			fmt.Fprintf(stderr, "Error: download flags cannot be used with passthrough mode\n")
+			return 1
+		}
+		return runPassthrough(paths, ghArgv, repoFlag, repoSet, tokenFlag, stdin, stdout, stderr, d)
+	}
+
 	// Dispatch subcommands before any other validation.
 	opts := cliOptions{
-		firstPosAfterDoubleDash: firstPosAfterDoubleDash,
-		tokenFlag:               tokenFlag,
-		repoSet:                 repoSet,
-		outputSet:               outputSet,
-		outputDirSet:            outputDirSet,
-		noClobber:               noClobber,
+		tokenFlag:    tokenFlag,
+		repoSet:      repoSet,
+		outputSet:    outputSet,
+		outputDirSet: outputDirSet,
+		noClobber:    noClobber,
 	}
 	subcommand, dispatchErr := classifySubcommand(paths, opts)
 	if dispatchErr != nil {
@@ -316,18 +397,10 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 	}
 
 	// Resolve repository
-	var owner, name string
-	if repoSet {
-		if repoFlag == "" {
-			fmt.Fprintf(stderr, "Error: --repo value cannot be empty\n")
-			return 1
-		}
-		parts := strings.SplitN(repoFlag, "/", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			fmt.Fprintf(stderr, "Error: --repo must be in owner/repo format, got: %s\n", repoFlag)
-			return 1
-		}
-		owner, name = parts[0], parts[1]
+	owner, name, parseErr := parseRepoFlag(repoFlag, repoSet)
+	if parseErr != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", parseErr)
+		return 1
 	}
 
 	repoInfo, err := d.resolveRepo(owner, name)
@@ -344,13 +417,13 @@ func run(args []string, stdout, stderr io.Writer, d deps) int {
 	// Upload each file, continuing on error
 	hasError := false
 	for _, path := range paths {
-		markdown, err := uploadFile(repoInfo, path)
+		result, err := uploadFile(repoInfo, path)
 		if err != nil {
 			fmt.Fprintf(stderr, "Error uploading %s: %v\n", path, err)
 			hasError = true
 			continue
 		}
-		fmt.Fprintln(stdout, markdown)
+		fmt.Fprintln(stdout, result.Markdown)
 	}
 	if hasError {
 		return 1
@@ -374,7 +447,7 @@ func classifySubcommand(paths []string, opts cliOptions) (string, error) {
 		}
 		return nil
 	}
-	if len(paths) == 0 || opts.firstPosAfterDoubleDash {
+	if len(paths) == 0 {
 		return "", notDownload("upload")
 	}
 	switch paths[0] {
@@ -406,6 +479,208 @@ func classifySubcommand(paths []string, opts cliOptions) (string, error) {
 	default:
 		return "", notDownload("upload")
 	}
+}
+
+func parseRepoFlag(flag string, set bool) (owner, name string, err error) {
+	if !set {
+		return "", "", nil
+	}
+	if flag == "" {
+		return "", "", fmt.Errorf("--repo value cannot be empty")
+	}
+	parts := strings.Split(flag, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("--repo must be in owner/repo format, got: %s", flag)
+	}
+	return parts[0], parts[1], nil
+}
+
+func runPassthrough(files, ghArgv []string, repoFlag string, repoSet bool, tokenFlag string, stdin io.Reader, stdout, stderr io.Writer, d deps) int {
+	if _, _, err := parseRepoFlag(repoFlag, repoSet); err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	cl, err := passthrough.Classify(ghArgv)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	var hasAttach bool
+	if cl.Kind != passthrough.KindCreate || cl.BodyFlag == "" {
+		hasAttach = d.probeGH(strings.Fields(cl.Subcommand))
+	}
+	switch cl.Kind {
+	case passthrough.KindCreate:
+		return runPassthroughCreate(cl, files, ghArgv, repoFlag, repoSet, tokenFlag, hasAttach, stdin, stdout, stderr, d)
+	case passthrough.KindComment, passthrough.KindEdit:
+		return runPassthroughCommentEdit(cl, files, ghArgv, repoFlag, repoSet, tokenFlag, hasAttach, stdin, stdout, stderr, d)
+	default:
+		return 1
+	}
+}
+
+func runPassthroughCreate(cl *passthrough.Result, files, ghArgv []string, repoFlag string, repoSet bool, tokenFlag string, hasAttach bool, stdin io.Reader, stdout, stderr io.Writer, d deps) int {
+	if cl.BodyFlag != "" {
+		return runOurRoute(cl, files, ghArgv, repoFlag, repoSet, tokenFlag, stdin, stdout, stderr, d)
+	}
+	if !hasAttach {
+		fmt.Fprintf(stderr, "Error: %s: no body flag (--body/-b or --body-file/-F) and gh --attach unavailable; cannot attach files\n", cl.Subcommand)
+		return 1
+	}
+	return d.execGH(buildDelegateArgv(ghArgv, files), stdin, stdout, stderr)
+}
+
+func runPassthroughCommentEdit(cl *passthrough.Result, files, ghArgv []string, repoFlag string, repoSet bool, tokenFlag string, hasAttach bool, stdin io.Reader, stdout, stderr io.Writer, d deps) int {
+	stdinReader := func() io.Reader { return stdin }
+	if (cl.BodyFlag == "--body-file" || cl.BodyFlag == "-F") && cl.BodyValue == "-" {
+		buf, err := io.ReadAll(stdin)
+		if err != nil {
+			fmt.Fprintf(stderr, "Error reading body from stdin: %v\n", err)
+			return 1
+		}
+		stdinReader = func() io.Reader { return bytes.NewReader(buf) }
+	}
+
+	delegateCode := 1
+	if hasAttach {
+		// Backdated so a comment stamped by a server clock behind ours still
+		// counts as posted; a miss here means a duplicate comment.
+		start := time.Now().Add(-clockSkewAllowance)
+		delegateCode = d.execGH(buildDelegateArgv(ghArgv, files), stdinReader(), stdout, stderr)
+		if delegateCode == 0 {
+			return 0
+		}
+		if cl.Kind == passthrough.KindComment {
+			repoName := ""
+			repoSpecified := cl.Repo != ""
+			if repoSpecified {
+				if owner, name, parseErr := parseRepoFlag(cl.Repo, true); parseErr == nil {
+					repoName = owner + "/" + name
+				}
+			}
+			if !repoSpecified && cl.TargetNum != "" {
+				if owner, name, parseErr := parseRepoFlag(repoFlag, repoSet); parseErr == nil {
+					if info, resolveErr := d.resolveRepo(owner, name); resolveErr == nil {
+						repoName = info.Owner + "/" + info.Name
+					}
+				}
+			}
+			if _, numErr := strconv.Atoi(cl.TargetNum); repoName != "" && cl.TargetNum != "" && numErr == nil {
+				if posted, _ := d.checkCommentPosted(cl.Subcommand, repoName, cl.TargetNum, start); posted {
+					fmt.Fprintf(stderr, "Error: gh %s failed (exit %d) after partially posting; comment may be missing attachments: %s\n", cl.Subcommand, delegateCode, strings.Join(files, ", "))
+					return delegateCode
+				}
+			}
+		}
+	}
+
+	if cl.BodyFlag == "" {
+		fmt.Fprintf(stderr, "Error: %s: no body flag (--body/-b or --body-file/-F); cannot attach files without a body to rewrite\n", cl.Subcommand)
+		return delegateCode
+	}
+	return runOurRoute(cl, files, ghArgv, repoFlag, repoSet, tokenFlag, stdinReader(), stdout, stderr, d)
+}
+
+func runOurRoute(cl *passthrough.Result, files, ghArgv []string, repoFlag string, repoSet bool, tokenFlag string, stdin io.Reader, stdout, stderr io.Writer, d deps) int {
+	uploadRepoFlag := cl.Repo
+	uploadRepoSet := cl.Repo != ""
+	if !uploadRepoSet && repoSet {
+		uploadRepoFlag = repoFlag
+		uploadRepoSet = true
+	}
+	owner, name, parseErr := parseRepoFlag(uploadRepoFlag, uploadRepoSet)
+	if parseErr != nil {
+		fmt.Fprintf(stderr, "Error: invalid --repo value %q: %v\n", uploadRepoFlag, parseErr)
+		return 1
+	}
+	repoInfo, err := d.resolveRepo(owner, name)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error resolving repository: %v\n", err)
+		return 1
+	}
+
+	var body string
+	switch cl.BodyFlag {
+	case "--body", "-b":
+		body = cl.BodyValue
+	case "--body-file", "-F":
+		if cl.BodyValue == "-" {
+			raw, readErr := io.ReadAll(stdin)
+			if readErr != nil {
+				fmt.Fprintf(stderr, "Error reading body from stdin: %v\n", readErr)
+				return 1
+			}
+			body = string(raw)
+			stdin = strings.NewReader("")
+		} else {
+			raw, readErr := os.ReadFile(cl.BodyValue)
+			if readErr != nil {
+				fmt.Fprintf(stderr, "Error reading body file %s: %v\n", cl.BodyValue, readErr)
+				return 1
+			}
+			body = string(raw)
+		}
+	}
+
+	uploadFile := d.newUploader(tokenFlag, stderr)
+	var paths, urls, appendMDs []string
+	hasError := false
+	for _, file := range files {
+		result, uploadErr := uploadFile(repoInfo, file)
+		if uploadErr != nil {
+			fmt.Fprintf(stderr, "Error uploading %s: %v\n", file, uploadErr)
+			hasError = true
+			continue
+		}
+		paths = append(paths, file)
+		urls = append(urls, result.URL)
+		appendMDs = append(appendMDs, result.Markdown)
+	}
+	if hasError {
+		return 1
+	}
+
+	rewritten, err := passthrough.RewriteBody(body, paths, urls, appendMDs)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	return d.execGH(buildOurRouteArgv(ghArgv, cl.BodyIndexes, rewritten), stdin, stdout, stderr)
+}
+
+func buildDelegateArgv(ghArgv, files []string) []string {
+	out := make([]string, len(ghArgv), len(ghArgv)+2*len(files))
+	copy(out, ghArgv)
+	for _, file := range files {
+		out = append(out, "--attach", file)
+	}
+	return out
+}
+
+// buildOurRouteArgv swaps the caller's body flags for the rewritten body,
+// dropping the exact argv positions Classify recorded. Matching by position
+// rather than by spelling leaves another flag's value alone even when that
+// value reads like a flag of ours, such as --title -Fix.
+func buildOurRouteArgv(ghArgv []string, bodyIndexes []int, body string) []string {
+	drop := make(map[int]bool, len(bodyIndexes))
+	for _, i := range bodyIndexes {
+		drop[i] = true
+	}
+	out := make([]string, 0, len(ghArgv)+2)
+	for i, arg := range ghArgv {
+		if !drop[i] {
+			out = append(out, arg)
+		}
+	}
+	return append(out, "--body", body)
+}
+
+func resolveGHBin() string {
+	if path := os.Getenv("GH_PATH"); path != "" {
+		return path
+	}
+	return "gh"
 }
 
 // resolveSessionCookie returns a GitHub session cookie using the first available
@@ -494,12 +769,11 @@ func checkToken(tokenFlag string, resolver func(string) (*http.Cookie, string, e
 // cliOptions carries parsed flag state into subcommand classification, so a new
 // flag does not mean a new positional parameter on classifySubcommand.
 type cliOptions struct {
-	firstPosAfterDoubleDash bool
-	tokenFlag               string
-	repoSet                 bool
-	outputSet               bool
-	outputDirSet            bool
-	noClobber               bool
+	tokenFlag    string
+	repoSet      bool
+	outputSet    bool
+	outputDirSet bool
+	noClobber    bool
 }
 
 // downloadOnly reports whether any download-only flag was given. Those flags are
