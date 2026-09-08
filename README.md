@@ -42,6 +42,7 @@ $ gh image report.pdf
 - **Repositories you can only read** — attach a screenshot to a bug report on a project you do not have push access to.
 - **A link on its own** — for a README, a commit message, a Slack thread, or anywhere that isn't an issue or PR.
 - **Fetching attachments back down** — `gh image download` pulls a `user-attachments` file to disk.
+- **CI and automation** — `--attach` rejects the Actions `GITHUB_TOKEN`, so a workflow cannot attach anything with it. `gh image` runs unattended with a session token (see [CI / CD](#ci--cd)).
 
 It also wraps `--attach` rather than competing with it: pass a `gh` command after `--` and the eligible files go through `gh` itself. See [Post it in one command](#post-it-in-one-command).
 
@@ -120,9 +121,6 @@ gh image report.pdf
 
 # Target a specific repository
 gh image screenshot.png --repo owner/repo
-
-# Give an image alt text
-gh image 'screenshot.png#The login error state'
 ```
 
 Each successful upload prints a ready-to-paste reference on its own line — an inline embed for images, a bare URL for videos (which GitHub renders as an inline player), and a download link for other files:
