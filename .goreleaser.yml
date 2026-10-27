@@ -76,10 +76,7 @@ release:
   header: |
     Highlights since {{ .PreviousTag }}:
 
-    - **Post in one command with `--`** (#58): anything after `--` is a `gh` command, forwarded as written. The files upload first and their links land in the body — `gh image bug.png -- issue comment 42 --body-file repro.md`. Files `gh` can take go through its own `--attach`; everything else uploads on the existing routes, with the body's local-path references repointed at the uploaded assets either way.
-    - **Reframed around first-party attachments.** GitHub shipped `--attach` in [`gh` v2.99.0](https://github.com/cli/cli/releases/tag/v2.99.0) on 2026-09-01. The README now sends the common case there and states what it does not cover: any file type GitHub accepts, repositories you can only read, a link on its own, downloads, and CI (#59).
-
-    > [!WARNING]
-    > **`--` changed meaning.** It used to terminate flag parsing so a filename beginning with a dash could be passed positionally. It now marks the start of a `gh` command, so write such a filename as `./-name.png`. The old form fails with a clear error rather than doing something unexpected.
+    - **Fix: uploading several non-image files in one run** (#66). After the first file, GitHub serves the repository page in a variant that embeds the upload token as an unquoted property, so every later PDF, ZIP or other non-image file failed with a misleading "you may not have upload access" error. Both forms are now recognized. Image uploads were unaffected.
+    - Dependency bump: goldmark 1.8.6 (#65).
 
     Full list below.
