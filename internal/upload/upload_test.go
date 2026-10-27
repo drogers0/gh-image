@@ -330,6 +330,48 @@ func TestUpload_Flow(t *testing.T) {
 	}
 }
 
+func TestUpload_AcceptsUnquotedTokenKeyAcrossFiles(t *testing.T) {
+	img := filepath.Join(t.TempDir(), "shot.png")
+	if err := os.WriteFile(img, []byte("pngbytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var srv *httptest.Server
+	var sawUIEligibility bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/octo/hello", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := r.Cookie("ui_eligible"); err == nil {
+			sawUIEligibility = true
+			_, _ = w.Write([]byte(`x={uploadToken:"TKN"}`))
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "ui_eligible", Value: "1", Path: "/"})
+		_, _ = w.Write([]byte(`x={"uploadToken":"TKN"}`))
+	})
+	mux.HandleFunc("/upload/policies/assets", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(validPolicy(srv.URL + "/s3")))
+	})
+	mux.HandleFunc("/s3", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/upload/assets/99", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"href":"https://gh/assets/x","name":"shot.png"}`))
+	})
+	srv = newServer(t, mux.ServeHTTP)
+
+	client := NewClient(&http.Cookie{Name: "user_session", Value: "tok"})
+	client.baseURL = srv.URL
+	for i := 0; i < 2; i++ {
+		if _, err := client.Upload("octo", "hello", 42, img); err != nil {
+			t.Fatalf("upload %d: %v", i+1, err)
+		}
+	}
+	if !sawUIEligibility {
+		t.Fatal("second repo request did not include ui_eligible")
+	}
+}
+
 // TestUpload_Flow_NonImage runs the full four-step flow for a non-image file and
 // confirms the finalize PUT follows the policy's asset_upload_url
 // (/upload/repository-files/{id}, not the image /upload/assets/{id}) and that the

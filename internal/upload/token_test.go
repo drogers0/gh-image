@@ -198,6 +198,24 @@ func TestGetUploadToken(t *testing.T) {
 			wantToken: "TKN123",
 		},
 		{
+			name:      "success extracts an unquoted JavaScript property",
+			owner:     "octocat",
+			body:      `window.x={uploadToken:"TKN123"};`,
+			wantToken: "TKN123",
+		},
+		{
+			name:      "success extracts a property with whitespace",
+			owner:     "octocat",
+			body:      `window.x={ "uploadToken" : "TKN123" };`,
+			wantToken: "TKN123",
+		},
+		{
+			name:        "another property ending with uploadToken does not match",
+			owner:       "octocat",
+			body:        `window.x={otheruploadToken:"TKN123"};`,
+			errContains: []string{"uploadToken not found"},
+		},
+		{
 			name:        "SAML interstitial gives an actionable SSO error, not an access error",
 			owner:       "GymPod",
 			body:        `<title>Sign in to GymPod</title><a href="/orgs/GymPod/sso">Single sign-on</a>`,

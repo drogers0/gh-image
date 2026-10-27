@@ -10,7 +10,9 @@ import (
 	"github.com/drogers0/gh-image/internal/httputil"
 )
 
-var uploadTokenRe = regexp.MustCompile(`"uploadToken":"([^"]+)"`)
+// GitHub embeds the token as a quoted JSON key or an unquoted JavaScript
+// property, depending on the ui_eligible cookie's repository-page variant.
+var uploadTokenRe = regexp.MustCompile(`(?:"uploadToken"|\buploadToken)\s*:\s*"([^"]+)"`)
 
 var signInTitleRe = regexp.MustCompile(`(?i)<title>\s*Sign in to GitHub\b`)
 
